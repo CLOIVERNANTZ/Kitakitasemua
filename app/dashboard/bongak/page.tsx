@@ -41,19 +41,37 @@ export default function BongakPage() {
   };
 
   // 👑 DAFTAR GELAR TONGKRONGAN (Diberikan otomatis & konsisten berdasarkan nama)
-  const getTongkronganBadge = (name: string) => {
-    const badges = [
-      { label: 'Buronan Patungan 💸', css: 'bg-rose-50 text-rose-600 border-rose-100' },
-      { label: 'Donatur Tetap 👑', css: 'bg-amber-50 text-amber-700 border-amber-100' },
-      { label: 'Suhu Sepuh 🧎‍♂️', css: 'bg-purple-50 text-purple-600 border-purple-100' },
-      { label: 'Intel Gosip 🕵️‍♂️', css: 'bg-blue-50 text-blue-600 border-blue-100' },
-      { label: 'Beban Tongkrongan 🎒', css: 'bg-slate-100 text-slate-600 border-slate-200' },
-      { label: 'Menteri Hiburan 🎸', css: 'bg-emerald-50 text-emerald-600 border-emerald-100' }
-    ];
-    // Menggunakan panjang nama sebagai pengacak instan agar gelarnya tidak berubah-ubah saat di-refresh
-    const index = (name || '').length % badges.length;
-    return badges[index];
-  };
+  // 👑 DAFTAR GELAR TONGKRONGAN (Diberikan otomatis & konsisten berdasarkan nama)
+const getTongkronganBadge = (name: string) => {
+  const badges = [
+    // --- GELAR LAMA ---
+    { label: 'Buronan Patungan 💸', css: 'bg-rose-50 text-rose-600 border-rose-100' },
+    { label: 'Donatur Tetap 👑', css: 'bg-amber-50 text-amber-700 border-amber-100' },
+    { label: 'Suhu Sepuh 🧎‍♂️', css: 'bg-purple-50 text-purple-600 border-purple-100' },
+    { label: 'Intel Gosip 🕵️‍♂️', css: 'bg-blue-50 text-blue-600 border-blue-100' },
+    { label: 'Beban Tongkrongan 🎒', css: 'bg-slate-100 text-slate-600 border-slate-200' },
+    { label: 'Menteri Hiburan 🎸', css: 'bg-emerald-50 text-emerald-600 border-emerald-100' },
+    
+    // --- GELAR BARU ---
+    { label: 'Kang Wacana 💬', css: 'bg-orange-50 text-orange-600 border-orange-100' },
+    { label: 'Raja Telat 🐢', css: 'bg-red-50 text-red-600 border-red-100' },
+    { label: 'Sapu Jagat Makanan 🍽️', css: 'bg-teal-50 text-teal-700 border-teal-100' },
+    { label: 'Bandar Dadakan 🏧', css: 'bg-lime-50 text-lime-700 border-lime-100' },
+    { label: 'Si Paling Sibuk 🌪️', css: 'bg-cyan-50 text-cyan-700 border-cyan-100' },
+    { label: 'Kang Ghosting 👻', css: 'bg-zinc-100 text-zinc-600 border-zinc-200' },
+    { label: 'Ahli Nego Harga 🤝', css: 'bg-indigo-50 text-indigo-600 border-indigo-100' },
+    { label: 'Penikmat Gratisan 🎯', css: 'bg-pink-50 text-pink-600 border-pink-100' },
+    { label: 'Seksi Repot 🛠️', css: 'bg-fuchsia-50 text-fuchsia-600 border-fuchsia-100' },
+    { label: 'Tukang Tepar Duluan 😴', css: 'bg-sky-50 text-sky-600 border-sky-100' }
+  ];
+
+  // Menggunakan nama sebagai pengacak instan agar gelarnya tidak berubah-ubah
+  const charSum = (name || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const index = charSum % badges.length;
+  
+  // 👇 INI BARIS YANG HILANG BWANG (Wajib ada biar datanya dikirim ke komponen)
+  return badges[index]; 
+};
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto min-h-screen bg-slate-50">
