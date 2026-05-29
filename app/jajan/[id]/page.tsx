@@ -61,6 +61,9 @@ export default function SesiJajanPage() {
     is_ppn_included: true, ppn_rate: 11
   });
 
+  // 🟢 LOGIKA SATPAM DITARUH DI SINI (Di luar kurung formItem)
+  const isAdminSesi = pahlawanIds.includes(currentUser?.id);
+
   useEffect(() => {
     const fetchInitialData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -366,7 +369,23 @@ export default function SesiJajanPage() {
                 </div>
                 
                 <form onSubmit={handleSaveItem} className="space-y-4">
-                  <div><label className="text-xs font-medium block mb-1">Siapa yang Makan?</label><select value={formItem.user_id} onChange={(e) => setFormItem({ ...formItem, user_id: e.target.value })} className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm font-semibold">{anggota.map(a => <option key={a.id} value={a.id}>{a.nama}</option>)}</select></div>
+                  <div>
+                    <label className="text-xs font-medium block mb-1">Siapa yang Makan?</label>
+                    <select 
+                        value={formItem.user_id} 
+                        onChange={(e) => setFormItem({ ...formItem, user_id: e.target.value })} 
+                        disabled={!isAdminSesi} // 👈 KUNCI JIKA BUKAN ADMIN/PAHLAWAN
+                        className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm font-semibold disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {isAdminSesi 
+                            // Jika Admin, tampilkan semua warga
+                            ? anggota.map(a => <option key={a.id} value={a.id}>{a.nama}</option>)
+                            // Jika bukan admin, PAKSA hanya tampilkan namanya sendiri
+                            : anggota.filter(a => a.id === currentUser?.id).map(a => <option key={a.id} value={a.id}>{a.nama}</option>)
+                        }
+                    </select>
+                    {!isAdminSesi && <p className="text-[10px] text-amber-600 mt-1 italic">*Hanya Pahlawan yang bisa memesan pakai nama orang lain.</p>}
+                  </div>
                   <div><label className="text-xs font-medium block mb-1">Nama Menu</label><input type="text" required value={formItem.nama_menu} onChange={(e) => setFormItem({ ...formItem, nama_menu: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" /></div>
                   <div><label className="text-xs font-medium block mb-1 text-slate-500">Catatan Khusus</label><input type="text" placeholder="Opsional (Cth: Pedas)" value={formItem.catatan} onChange={(e) => setFormItem({ ...formItem, catatan: e.target.value })} className="w-full px-3 py-2 border bg-slate-50 rounded-xl text-sm italic" /></div>
                   <div className="grid grid-cols-3 gap-3 items-end">

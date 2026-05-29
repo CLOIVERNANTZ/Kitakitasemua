@@ -7,8 +7,74 @@ import CustomModal from '@/components/CustomModal'; // ✅ Import Modal
 
 // --- INTERFACES ---
 interface DetailNalangin { id: string; target_user_id: string; nominal: number; }
-interface LapakRow { id: string; nama: string; pemasukan: number; pengeluaran: Record<string, number>; nalangin_details: DetailNalangin[]; }
+interface LapakRow { id: string; nama: string; pemasukan: number; raw_pemasukan?: string; pengeluaran: Record<string, number>; raw_pengeluaran?: Record<string, string>; nalangin_details: DetailNalangin[]; }
 interface Anggota { id: string; nama: string; }
+
+
+
+const ExcelCell = ({ value, rawValue, onUpdate, disabled, className, placeholder = "0" }: any) => {
+    const [isFocused, setIsFocused] = useState(false);
+    const [localVal, setLocalVal] = useState(rawValue || (value ? value.toString() : ''));
+
+    useEffect(() => {
+        if (!isFocused) {
+            setLocalVal(rawValue || (value === 0 || !value ? '' : value.toString()));
+        }
+    }, [value, rawValue, isFocused]);
+
+    const handleBlur = () => {
+        setIsFocused(false);
+        let evaluated = 0;
+        let raw = localVal.trim();
+
+        // 🔥 FITUR BARU: Kalau lupa ketik '=', tapi ada simbol matematika (+ - * /), otomatis dihitung!
+        if (!raw.startsWith('=') && /[+\-*/]/.test(raw)) {
+            raw = '=' + raw; 
+        }
+
+        if (raw.startsWith('=')) {
+            try {
+                const cleanStr = raw.substring(1).replace(/[^\d+\-*/.]/g, '');
+                // Cegah error kalau rumusnya masih gantung (contoh: "=10000+")
+                if (cleanStr && !/[+\-*/.]$/.test(cleanStr)) {
+                    evaluated = Function(`'use strict'; return (${cleanStr})`)() || 0;
+                } else {
+                    evaluated = 0; // Biarkan 0, tapi raw-nya tetap tersimpan
+                }
+            } catch (e) { evaluated = 0; }
+        } else {
+            evaluated = Number(raw.replace(/\D/g, '')) || 0;
+            raw = evaluated ? evaluated.toString() : '';
+        }
+        onUpdate(evaluated, raw);
+    };
+
+    // Logika Pintar untuk Tampilan
+    let displayValue = '';
+    if (isFocused) {
+        displayValue = localVal; // Saat diketik, tampilkan apa adanya
+    } else {
+        if (rawValue && rawValue.startsWith('=')) {
+            // Jika rumusnya belum selesai (misal baru ngetik "="), JANGAN DIHAPUS/DISEMBUNYIKAN!
+            displayValue = (value === 0 && rawValue !== '=0') ? rawValue : Math.round(value).toLocaleString('id-ID');
+        } else {
+            displayValue = (value === 0 || !value) ? '' : Math.round(value).toLocaleString('id-ID');
+        }
+    }
+
+    return (
+        <input
+            disabled={disabled}
+            type="text"
+            value={displayValue}
+            onFocus={() => setIsFocused(true)}
+            onChange={(e) => setLocalVal(e.target.value)}
+            onBlur={handleBlur}
+            placeholder={isFocused ? "25000+5000" : placeholder}
+            className={className}
+        />
+    );
+};
 
 function BukuLapakContent() {
     const searchParams = useSearchParams();
@@ -19,7 +85,7 @@ function BukuLapakContent() {
     const [anggota, setAnggota] = useState<Anggota[]>([]);
 
     const [isLoaded, setIsLoaded] = useState(false);
-    const [statusSesi, setStatusSesi] = useState('Open'); 
+    const [statusSesi, setStatusSesi] = useState('Open');
     const [lapakId, setLapakId] = useState('');
     const [namaLapak, setNamaLapak] = useState('');
     const [bendaharaId, setBendaharaId] = useState('');
@@ -40,7 +106,7 @@ function BukuLapakContent() {
         type: 'success' as 'success' | 'error' | 'warning' | 'loading',
         title: '',
         message: '',
-        onConfirm: () => {},
+        onConfirm: () => { },
         onCancel: undefined as (() => void) | undefined
     });
     const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
@@ -61,7 +127,7 @@ function BukuLapakContent() {
                 let clean = (savedRows || []).filter(r => realIds.includes(r.id));
                 listAnggota.forEach(a => {
                     const existing = clean.find(r => r.id === a.id);
-                    if (!existing) clean.push({ id: a.id, nama: a.nama || 'User Baru', pemasukan: 0, pengeluaran: {}, nalangin_details: [] });
+                    if (!existing) clean.push({ id: a.id, nama: a.nama || 'User Baru', pemasukan: 0, raw_pemasukan: '', pengeluaran: {}, raw_pengeluaran: {}, nalangin_details: [] });
                     else existing.nama = a.nama || 'User Baru';
                 });
                 return clean;
@@ -72,8 +138,8 @@ function BukuLapakContent() {
                 if (data) {
                     setLapakId(data.id);
                     setNamaLapak(data.nama_acara || '');
-                    setStatusSesi(data.status); 
-                    
+                    setStatusSesi(data.status);
+
                     if (data.data_ekstra) {
                         setKolomBiaya(data.data_ekstra.kolomBiaya || []);
                         setRundown(data.data_ekstra.rundown || '');
@@ -174,7 +240,7 @@ function BukuLapakContent() {
     const hapusKolom = (colNameToDelete: string) => {
         if (statusSesi === 'Closed') return;
         setModal(prev => ({
-            ...prev, isOpen: true, type: 'warning', title: 'Hapus Kolom?', 
+            ...prev, isOpen: true, type: 'warning', title: 'Hapus Kolom?',
             message: `Hapus kolom "${colNameToDelete}" dari pengeluaran?`,
             onCancel: closeModal,
             onConfirm: () => {
@@ -189,13 +255,14 @@ function BukuLapakContent() {
         }));
     };
 
-    const updateSel = (rowId: string, value: string) => {
+    // 🟢 UPDATE EXCEL: Menerima hasil angka (value) dan rumus teks (rawValue)
+    const updateSel = (rowId: string, value: number, rawValue: string) => {
         if (statusSesi === 'Closed') return;
-        setRows(rows.map(r => r.id === rowId ? { ...r, pemasukan: Number(value.replace(/\D/g, '')) } : r));
+        setRows(rows.map(r => r.id === rowId ? { ...r, pemasukan: value, raw_pemasukan: rawValue } : r));
     };
-    const updatePengeluaran = (rowId: string, colName: string, value: string) => {
+    const updatePengeluaran = (rowId: string, colName: string, value: number, rawValue: string) => {
         if (statusSesi === 'Closed') return;
-        setRows(rows.map(r => r.id === rowId ? { ...r, pengeluaran: { ...r.pengeluaran, [colName]: Number(value.replace(/\D/g, '')) } } : r));
+        setRows(rows.map(r => r.id === rowId ? { ...r, pengeluaran: { ...r.pengeluaran, [colName]: value }, raw_pengeluaran: { ...(r.raw_pengeluaran || {}), [colName]: rawValue } } : r));
     };
     const tambahBarisNalangin = (rowId: string) => {
         if (statusSesi === 'Closed') return;
@@ -213,38 +280,38 @@ function BukuLapakContent() {
     // ✅ DIGANTI DENGAN CUSTOM MODAL
     const resetProject = () => {
         setModal(prev => ({
-            ...prev, isOpen: true, type: 'warning', title: 'Buat Baru?', 
+            ...prev, isOpen: true, type: 'warning', title: 'Buat Baru?',
             message: 'Keluar dari halaman ini dan buat proyek kosong baru?',
             onCancel: closeModal,
             onConfirm: () => {
                 localStorage.removeItem('db_draft_lapak');
                 router.push('/dashboard/lapak');
-                window.location.reload(); 
+                window.location.reload();
             }
         }));
     };
 
     // ✅ FITUR : EXPORT PDF
-    
+
     const handleExportPDF = async () => {
         const element = document.getElementById('area-export-pdf');
         if (!element) return;
-        
+
         // Modal loading
         setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Menyiapkan Dokumen...', message: 'Sedang memproses PDF...', onCancel: undefined }));
-        
+
         try {
             const html2pdf = (await import('html2pdf.js')).default;
-            
-           
+
+
             const opt: any = {
-                margin:       0.2,
-                filename:     `Laporan_${namaLapak}_${Date.now()}.pdf`,
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, useCORS: true },
-                jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+                margin: 0.2,
+                filename: `Laporan_${namaLapak}_${Date.now()}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true },
+                jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }
             };
-            
+
             await html2pdf().set(opt).from(element).save();
             setModal(prev => ({ ...prev, isOpen: true, type: 'success', title: 'Berhasil!', message: 'File PDF berhasil diunduh.', onConfirm: closeModal }));
         } catch (err) {
@@ -258,12 +325,12 @@ function BukuLapakContent() {
         if (partisipanIds.length === 0) return setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Oops!', message: 'Tidak ada partisipan di proyek ini.', onConfirm: closeModal }));
 
         setModal(prev => ({
-            ...prev, isOpen: true, type: 'warning', title: 'Tutup Permanen?', 
+            ...prev, isOpen: true, type: 'warning', title: 'Tutup Permanen?',
             message: 'Tutup proyek lapak ini? Seluruh teman yang memiliki saldo minus otomatis akan mendapatkan tagihan resmi ke Bendahara.',
             onCancel: closeModal,
             onConfirm: async () => {
                 setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Memproses...', message: 'Menutup sesi dan menyiapkan tagihan...', onCancel: undefined }));
-                
+
                 const newTransfers: any[] = [];
                 activeRows.forEach(row => {
                     const sisa = getSisaKeseluruhan(row);
@@ -287,7 +354,7 @@ function BukuLapakContent() {
                 }
 
                 const { error: eventError } = await supabase.from('events').update({ status: 'Closed' }).eq('id', lapakId);
-                
+
                 if (!eventError) {
                     setStatusSesi('Closed');
                     setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Terkunci!', message: 'Proyek Lapak resmi ditutup. Tagihan telah disebar.', onConfirm: closeModal }));
@@ -362,7 +429,7 @@ function BukuLapakContent() {
             <header className="mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4">
                 <div>
                     <h2 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
-                        📊 Project Lapak 
+                        📊 Project Lapak
                         {statusSesi === 'Closed' && <span className="text-[10px] bg-rose-100 text-rose-700 px-2 py-1 rounded-md uppercase tracking-widest mt-1">Read-Only</span>}
                     </h2>
                     <p className="text-slate-500 mt-1">Laporan Excel live yang membagi biaya otomatis.</p>
@@ -382,7 +449,7 @@ function BukuLapakContent() {
                     )}
                     {isProjectOpen && (
                         isSaving ? <span className="text-xs font-bold text-amber-600 bg-amber-50 px-3 py-2.5 rounded-xl animate-pulse border border-amber-200">⏳ Menyimpan...</span>
-                        : statusSesi === 'Open' ? <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2.5 rounded-xl border border-emerald-200">✅ Sinkron</span> : null
+                            : statusSesi === 'Open' ? <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2.5 rounded-xl border border-emerald-200">✅ Sinkron</span> : null
                     )}
                     <button onClick={resetProject} className="bg-white border border-slate-200 text-slate-600 text-sm font-bold px-4 py-2 rounded-xl shadow-sm hover:bg-slate-50">
                         + Baru
@@ -431,7 +498,13 @@ function BukuLapakContent() {
                                         <div key={row.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
                                             <div className="flex justify-between items-center border-b pb-3"><h4 className="font-bold text-slate-800 text-lg">{row.nama} {row.id === bendaharaId && '👑'}</h4><div className={`font-black text-xl ${sisa < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{sisa < 0 ? '' : '+'}{Math.round(sisa).toLocaleString('id-ID')}</div></div>
                                             <div className="grid grid-cols-2 gap-3 text-sm">
-                                                <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Deposit</label><input disabled={statusSesi === 'Closed'} type="text" value={row.pemasukan === 0 ? '' : row.pemasukan.toLocaleString('id-ID')} onChange={(e) => updateSel(row.id, e.target.value)} placeholder="0" className="w-full px-2 py-2 bg-emerald-50 border rounded-lg outline-none font-semibold text-emerald-800" /></div>
+                                                <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Deposit</label><ExcelCell
+                                                    disabled={statusSesi === 'Closed'}
+                                                    value={row.pemasukan}
+                                                    rawValue={row.raw_pemasukan}
+                                                    onUpdate={(v: number, r: string) => updateSel(row.id, v, r)}
+                                                    className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded font-medium text-emerald-800"
+                                                /></div>
                                                 <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Nalangin</label><button onClick={() => setModalNalangin({ isOpen: true, rowId: row.id })} className="w-full text-left px-2 py-2 bg-blue-50 border rounded-lg text-blue-800 font-semibold">{getSumNalangin(row.nalangin_details) === 0 ? '+ Input Detail' : `Rp ${getSumNalangin(row.nalangin_details).toLocaleString('id-ID')}`}</button></div>
                                             </div>
                                             {kolomBiaya.length > 0 && (
@@ -439,7 +512,13 @@ function BukuLapakContent() {
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Pengeluaran Individu</label>
                                                     <div className="space-y-2">
                                                         {kolomBiaya.map(col => (
-                                                            <div key={col} className="flex justify-between items-center gap-2"><span className="text-sm font-medium text-slate-600 truncate w-1/2">{col}</span><input disabled={statusSesi === 'Closed'} type="text" value={row.pengeluaran[col] === 0 || !row.pengeluaran[col] ? '' : Math.round(row.pengeluaran[col]).toLocaleString('id-ID')} onChange={(e) => updatePengeluaran(row.id, col, e.target.value)} placeholder="-" className="w-1/2 px-2 py-2 bg-slate-50 border rounded-lg outline-none text-slate-700 text-right text-sm" /></div>
+                                                            <div key={col} className="flex justify-between items-center gap-2"><span className="text-sm font-medium text-slate-600 truncate w-1/2">{col}</span><ExcelCell
+                                                                disabled={statusSesi === 'Closed'}
+                                                                value={row.pengeluaran[col]}
+                                                                rawValue={row.raw_pengeluaran?.[col]}
+                                                                onUpdate={(v: number, r: string) => updatePengeluaran(row.id, col, v, r)}
+                                                                className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded text-slate-700"
+                                                            /></div>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -480,9 +559,21 @@ function BukuLapakContent() {
                                         return (
                                             <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                                                 <td className="px-4 py-2.5 border border-slate-200 font-bold text-slate-800 text-left bg-white">{row.nama} {row.id === bendaharaId && '👑'}</td>
-                                                <td className="px-2 py-1 border border-slate-200 bg-emerald-50/30"><input disabled={statusSesi === 'Closed'} type="text" value={row.pemasukan === 0 ? '' : row.pemasukan.toLocaleString('id-ID')} onChange={(e) => updateSel(row.id, e.target.value)} placeholder="0" className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded font-medium text-emerald-800" /></td>
+                                                <td className="px-2 py-1 border border-slate-200 bg-emerald-50/30"><ExcelCell
+                                                    disabled={statusSesi === 'Closed'}
+                                                    value={row.pemasukan}
+                                                    rawValue={row.raw_pemasukan}
+                                                    onUpdate={(v: number, r: string) => updateSel(row.id, v, r)}
+                                                    className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded font-medium text-emerald-800"
+                                                /></td>
                                                 {kolomBiaya.map(col => (
-                                                    <td key={col} className="px-2 py-1 border border-slate-200"><input disabled={statusSesi === 'Closed'} type="text" value={row.pengeluaran[col] === 0 || !row.pengeluaran[col] ? '' : Math.round(row.pengeluaran[col]).toLocaleString('id-ID')} onChange={(e) => updatePengeluaran(row.id, col, e.target.value)} placeholder="-" className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded text-slate-700" /></td>
+                                                    <td key={col} className="px-2 py-1 border border-slate-200"><ExcelCell
+                                                        disabled={statusSesi === 'Closed'}
+                                                        value={row.pengeluaran[col]}
+                                                        rawValue={row.raw_pengeluaran?.[col]}
+                                                        onUpdate={(v: number, r: string) => updatePengeluaran(row.id, col, v, r)}
+                                                        className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded text-slate-700"
+                                                    /></td>
                                                 ))}
                                                 <td className="px-4 py-2.5 border border-slate-200 bg-rose-50/50 font-bold text-rose-700">{getTotalPengeluaranUser(row).toLocaleString('id-ID')}</td>
                                                 <td className="px-2 py-1 border border-slate-200 bg-blue-50/30"><button onClick={() => setModalNalangin({ isOpen: true, rowId: row.id })} className="w-full text-right font-bold text-blue-800">{getSumNalangin(row.nalangin_details) === 0 ? '+ Input' : getSumNalangin(row.nalangin_details).toLocaleString('id-ID')}</button></td>
@@ -496,7 +587,7 @@ function BukuLapakContent() {
                             {activeRows.length > 0 && (
                                 <tfoot className="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
                                     <tr>
-                                        <td className="px-4 py-4 border text-center text-sm">TOTAL BIAYA<br/><span className="text-[9px] text-blue-600 bg-blue-100 px-1.5 rounded block mt-1" data-html2canvas-ignore>(Ketik untuk Bagi Rata) ➔</span></td>
+                                        <td className="px-4 py-4 border text-center text-sm">TOTAL BIAYA<br /><span className="text-[9px] text-blue-600 bg-blue-100 px-1.5 rounded block mt-1" data-html2canvas-ignore>(Ketik untuk Bagi Rata) ➔</span></td>
                                         <td className="px-4 py-4 border text-emerald-700 text-base">{sumPemasukan.toLocaleString('id-ID')}</td>
                                         {kolomBiaya.map(col => (
                                             <td key={col} className="px-2 py-2 border bg-blue-50/50" data-html2canvas-ignore>
