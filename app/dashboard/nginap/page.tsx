@@ -35,6 +35,7 @@ function NginapKuyContent() {
   const [rincianBiaya, setRincianBiaya] = useState<RincianBiaya[]>([]);
   const [inputItem, setInputItem] = useState('');
   const [inputHarga, setInputHarga] = useState('');
+  const [isOcrLoading, setIsOcrLoading] = useState(false);
   const totalBiaya = rincianBiaya.reduce((sum, r) => sum + r.harga, 0);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -100,6 +101,49 @@ function NginapKuyContent() {
     const hargaNum = Number(inputHarga.replace(/\D/g, ''));
     setRincianBiaya([...rincianBiaya, { id: 'item_' + Date.now(), item: inputItem, harga: hargaNum }]);
     setInputItem(''); setInputHarga('');
+  };
+
+  // ✅ LOGIKA SCAN STRUK DAN COMBINE BIAYA
+  const handleOcrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsOcrLoading(true);
+    setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Membaca Struk...', message: 'Google AI sedang memindai baris teks bill Anda...', onCancel: undefined }));
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = async () => {
+      try {
+        const base64Result = reader.result as string;
+        
+        // Tembak API Route internal kita
+        const res = await fetch('/api/ocr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64Result })
+        });
+
+        const data = await res.json();
+
+        if (data.items && data.items.length > 0) {
+          // 🌟 KUNCI LOGIKA: Gabungkan data lama (manual) dengan data baru hasil OCR Google
+          setRincianBiaya(prev => [...prev, ...data.items]);
+          
+          setModal(prev => ({
+            ...prev, isOpen: true, type: 'success', title: 'Scan Berhasil!', 
+            message: `Berhasil mendeteksi & menambahkan ${data.items.length} item pengeluaran baru dari struk!`,
+            onConfirm: closeModal
+          }));
+        } else {
+          setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Jelas', message: 'Google tidak menemukan format nama item & harga yang cocok. Silakan input manual atau coba foto lebih dekat.', onConfirm: closeModal }));
+        }
+      } catch (err) {
+        setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Scan', message: 'Terjadi kegagalan koneksi sistem OCR.', onConfirm: closeModal }));
+      } finally {
+        setIsOcrLoading(false);
+      }
+    };
   };
 
   const handleUbahPartisipan = (id: string, field: 'ikut' | 'isGratis', value: boolean) => {
@@ -247,14 +291,29 @@ function NginapKuyContent() {
           <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><span>📋</span> Rincian Pengeluaran</h3>
           
           {!isViewMode && (
-            <form onSubmit={handleTambahRincian} className="flex flex-col sm:flex-row gap-3 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100 mt-4">
-              <input type="text" placeholder="Nama Item (Cth: Sewa Villa)" required value={inputItem} onChange={(e)=>setInputItem(e.target.value)} className="flex-1 px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
-              <div className="relative flex-1">
-                <span className="absolute left-3 top-2 text-sm text-slate-400 font-bold">Rp</span>
-                <input type="text" placeholder="0" required value={inputHarga === '' ? '' : Number(inputHarga).toLocaleString('id-ID')} onChange={(e) => setInputHarga(e.target.value.replace(/\D/g, ''))} className="w-full pl-9 pr-3 py-2 text-sm font-bold border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            /* ✅ BUNGKUS DENGAN DIV INI AGAR REACT TIDAK ERROR */
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-4 space-y-4">
+              
+              {/* INPUT BIASA (MANUAL) */}
+              <form onSubmit={handleTambahRincian} className="flex flex-col sm:flex-row gap-3">
+                <input type="text" placeholder="Nama Item Manual (Cth: Sewa Villa)" required value={inputItem} onChange={(e)=>setInputItem(e.target.value)} className="flex-1 px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white" />
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-2 text-sm text-slate-400 font-bold">Rp</span>
+                  <input type="text" placeholder="0" required value={inputHarga === '' ? '' : Number(inputHarga).toLocaleString('id-ID')} onChange={(e) => setInputHarga(e.target.value.replace(/\D/g, ''))} className="w-full pl-9 pr-3 py-2 text-sm font-bold border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white" />
+                </div>
+                <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-sm">+ Tambah Manual</button>
+              </form>
+
+              {/* ✅ TOMBOL COMBINE UPLOAD STRUK OCR (OCR.SPACE) */}
+              <div className="pt-3 border-t border-dashed border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-400 uppercase">Punya Nota/Bill Panjang? Scan di sini otomatis ➔</span>
+                <label className={`w-full sm:w-auto bg-blue-100 text-blue-700 hover:bg-blue-200 px-5 py-2.5 rounded-xl font-bold text-sm border border-blue-200 shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all ${isOcrLoading ? 'opacity-50 cursor-not-allowed animate-pulse' : ''}`}>
+                  <input type="file" accept="image/*" disabled={isOcrLoading} onChange={handleOcrUpload} className="hidden" />
+                  📸 {isOcrLoading ? 'Sedang Membaca...' : 'Scan Foto Struk Bill'}
+                </label>
               </div>
-              <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors touch-manipulation">+ Tambah</button>
-            </form>
+
+            </div>
           )}
 
           <div className="overflow-x-auto border border-slate-200 rounded-xl mt-4">
