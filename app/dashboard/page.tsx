@@ -22,17 +22,16 @@ export default function DashboardPage() {
     const { data: profileData } = await supabase.from('profiles').select('nama').eq('id', user.id).single();
     setCurrentUser({ id: user.id, nama: profileData?.nama || 'User' });
 
-    // Tarik list Sesi - FILTER OPEN
+    // 1. TARIK SEMUA SESI OPEN (Tanpa memfilter partisipan_ids agar semua orang bisa lihat)
     const { data: eventsData } = await supabase
       .from('events')
       .select('*')
-      
-      .eq('status', 'Open') 
+      .eq('status', 'Open') // Filter ini saja yang dipertahankan
       .order('created_at', { ascending: false });
 
     if (eventsData) setHistory(eventsData);
 
-    // Tarik total Hutang
+    // 2. TARIK TOTAL HUTANG (Uang yang harus dibayar ke orang lain)
     const { data: tagihanData } = await supabase
       .from('tagihan')
       .select('nominal')
@@ -44,6 +43,7 @@ export default function DashboardPage() {
       setTotalHutangBerjalan(hutangSaya);
     }
 
+    // 3. TARIK TOTAL PIUTANG (Uang yang harus diterima dari orang lain)
     const { data: piutangData } = await supabase
       .from('tagihan')
       .select('nominal')
@@ -52,7 +52,7 @@ export default function DashboardPage() {
 
     if (piutangData) {
       const piutangSaya = piutangData.reduce((sum, tf) => sum + Number(tf.nominal), 0);
-      setTotalPiutangBerjalan(piutangSaya);
+      setTotalPiutangBerjalan(piutangSaya); 
     }
     
     setIsLoading(false);
