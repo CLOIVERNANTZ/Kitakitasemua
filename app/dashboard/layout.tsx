@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/utils/supabase'; // ✅ Memakai file utils/supabase
+import { supabase } from '@/utils/supabase';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -12,19 +12,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // ✅ STATE BARU UNTUK MENU HP
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
+  // ✅ STATE BARU UNTUK SATPAM GERBANG
+  const [isApproved, setIsApproved] = useState<boolean | null>(null); // null = masih ngecek
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
     let profileSubscription: any = null;
 
     const setupRealTimeProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setIsCheckingAuth(false);
+        return;
+      }
 
-      const { data: initialData } = await supabase.from('profiles').select('id, nama, avatar_url').eq('id', user.id).single();
-      if (initialData) setProfile(initialData);
+      // ✅ Ambil juga is_approved dari database
+      const { data: initialData } = await supabase
+        .from('profiles')
+        .select('id, nama, avatar_url, is_approved')
+        .eq('id', user.id)
+        .single();
 
+      if (initialData) {
+        setProfile({ id: initialData.id, nama: initialData.nama, avatar_url: initialData.avatar_url });
+        setIsApproved(initialData.is_approved);
+      }
+      setIsCheckingAuth(false);
+
+      // ✅ Realtime Listener (Pantau kalau God Admin ngasih ACC)
       profileSubscription = supabase
         .channel(`realtime-profile-${user.id}`)
         .on(
@@ -33,6 +50,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           (payload) => {
             const newData = payload.new as any;
             setProfile({ id: newData.id, nama: newData.nama, avatar_url: newData.avatar_url });
+            
+            // Otomatis buka gerbang kalau tiba-tiba di-ACC
+            if (newData.is_approved !== undefined) {
+              setIsApproved(newData.is_approved);
+            }
           }
         ).subscribe();
     };
@@ -44,14 +66,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
   }, []);
 
-
   // 🧹 SAPU OTOMATIS: Penjaga Sesi & Token Nyangkut
   useEffect(() => {
     const checkAndCleanSession = async () => {
-      // 1. Cek status sesi saat ini
       const { data, error } = await supabase.auth.getSession();
-
-      // 2. Jika ada error token nyangkut atau sesi tidak valid
       if (error || !data.session) {
         console.warn("🧹 Token kadaluarsa terdeteksi. Membersihkan...");
         await supabase.auth.signOut(); 
@@ -61,7 +79,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     checkAndCleanSession();
 
-    // 3. Pasang "CCTV" untuk memantau perubahan status (Cukup SIGNED_OUT saja)
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         router.push('/login');
@@ -73,7 +90,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
   }, [router, pathname]);
 
-  // ✅ Tutup menu HP otomatis setiap kali pindah halaman
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [pathname]);
@@ -106,22 +122,62 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setIsUploading(false);
   };
 
+  // ⏳ TAMPILAN LOADING SEBELUM TAHU STATUSNYA APA
+  if (isCheckingAuth) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-slate-400 font-bold animate-pulse">
+        Menghubungi Markas Pusat...
+      </div>
+    );
+  }
+
+  // 🛑 TAMPILAN HALT JIKA BELUM DI ACC
+  // Karena layout ini membungkus semuanya, sidebar dan header HP otomatis lenyap kalau belum di-ACC
+  if (isApproved === false) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-900 text-slate-100">
+        <div className="max-w-md w-full bg-white/10 p-8 rounded-3xl shadow-2xl text-center backdrop-blur-md border border-white/20">
+          <span className="text-6xl mb-4 block animate-bounce">👮‍♂️</span>
+          <h2 className="text-2xl font-black text-white mb-2">Halt! Siapa di sana?</h2>
+          <p className="text-slate-300 font-medium mb-6">
+            Akun kamu udah terdaftar, tapi gerbang masih digembok. Lapor ke "God Admin" dulu biar dibukain. <br/><br/>
+            <span className="text-amber-400 text-xs italic">
+              (Layar ini bakal otomatis ngebuka kok kalau kamu udah di-ACC, gak perlu di-refresh!)
+            </span>
+          </p>
+          <div className="bg-slate-950/50 p-4 rounded-xl border border-white/10 mb-6">
+            <p className="text-sm font-bold text-slate-400 mb-1">Kirim pesan / WA ke:</p>
+            <a href="mailto:germansiringo1234@gmail.com" className="text-amber-500 font-black text-lg hover:underline break-all">
+              germansiringo1234@gmail.com
+            </a>
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="w-full py-3 bg-rose-600/90 text-white font-bold rounded-xl hover:bg-rose-600 transition shadow-lg"
+          >
+            Keluar Dulu
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ JIKA SUDAH DI ACC, RENDER SIDEBAR DAN KONTEN SEPERTI BIASA
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden relative">
 
-      {/* ✅ MOBILE HEADER (HANYA MUNCUL DI HP) */}
+      {/* ✅ MOBILE HEADER */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-30 flex justify-between items-center px-4 shadow-sm">
         <h1 className="text-lg font-black text-slate-950 tracking-tight">💰 KitaKitaSemua</h1>
         <button 
           onClick={() => setIsMobileMenuOpen(true)}
           className="p-2 bg-slate-100 text-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
         >
-          {/* Ikon Hamburger */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
       </div>
 
-      {/* ✅ BACKDROP GELAP UNTUK HP (Muncul saat menu terbuka) */}
+      {/* ✅ BACKDROP GELAP UNTUK HP */}
       {isMobileMenuOpen && (
         <div 
           className="md:hidden fixed inset-0 bg-slate-900/50 z-40 backdrop-blur-sm transition-opacity"
@@ -129,7 +185,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ></div>
       )}
 
-      {/* ✅ SIDEBAR (RESPONSIVE: Slide-in di HP, Statis di Laptop) */}
+      {/* ✅ SIDEBAR */}
       <div className={`
         fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col justify-between flex-shrink-0
         transform transition-transform duration-300 ease-in-out
@@ -140,14 +196,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div>
           <div className="h-16 flex items-center justify-between px-6 border-b border-slate-100">
             <h1 className="text-xl font-black text-slate-950 tracking-tight">KitaKitaSemua</h1>
-            {/* Tombol Close (X) hanya untuk HP */}
             <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-rose-500">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
           
           <nav className="p-4 space-y-1.5 overflow-y-auto max-h-[calc(100vh-200px)] custom-scrollbar">
-            
             <Link href="/dashboard" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               🏠 Beranda
             </Link>
@@ -169,7 +223,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link href="/dashboard/histori" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/histori') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               📂 Histori Acara
             </Link>
-            
             <Link href="/dashboard/gallery" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/gallery') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               📸 Galeri KitaKitaSemua
             </Link>
@@ -216,7 +269,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </div>
 
-      {/* ✅ KONTEN UTAMA (Dengan padding atas ekstra di HP agar tidak tertutup header) */}
+      {/* ✅ KONTEN UTAMA */}
       <main className="flex-1 h-full overflow-y-auto relative z-10 pt-16 md:pt-0 bg-slate-50 w-full">
         {children}
       </main>

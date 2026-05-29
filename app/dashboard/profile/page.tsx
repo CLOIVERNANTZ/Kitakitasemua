@@ -1,10 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/utils/supabase'; // ✅ Pakai util Supabase
-import CustomModal from '@/components/CustomModal'; // ✅ Import Custom Modal
-
-
+import { supabase } from '@/utils/supabase';
+import CustomModal from '@/components/CustomModal'; 
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -13,6 +11,11 @@ export default function ProfilePage() {
   const [userAuth, setUserAuth] = useState<any>(null);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
+  // ✅ STATE KHUSUS GOD ADMIN
+  const [pendingUsers, setPendingUsers] = useState<any[]>([]);
+  const [loadingApprove, setLoadingApprove] = useState<string | null>(null);
+  const godAdminEmail = 'germansiringo1234@gmail.com';
+
   const [profile, setProfile] = useState({
     nama: '', email: '', no_hp: '', nama_bank: '', no_rekening: '', avatar_url: ''
   });
@@ -20,7 +23,6 @@ export default function ProfilePage() {
 
   const daftarBank = ['BCA', 'Mandiri', 'BNI', 'BRI', 'BSI', 'GoPay', 'OVO', 'DANA', 'ShopeePay', 'Bank Jago', 'SeaBank'];
 
-  // ✅ STATE UNTUK CUSTOM MODAL
   const [modal, setModal] = useState({
     isOpen: false,
     type: 'success' as 'success' | 'error' | 'warning' | 'loading',
@@ -44,6 +46,11 @@ export default function ProfilePage() {
         return;
       }
       setUserAuth(user);
+
+      // ✅ JIKA DIA GOD ADMIN, AMBIL DAFTAR ANTREAN
+      if (user.email === godAdminEmail) {
+        fetchPendingUsers();
+      }
 
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
@@ -71,6 +78,45 @@ export default function ProfilePage() {
     }
   };
 
+  // ✅ FUNGSI AMBIL DAFTAR USER YANG BELUM DI-ACC
+  const fetchPendingUsers = async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, nama, email, no_hp')
+      .eq('is_approved', false);
+    if (data) setPendingUsers(data);
+  };
+
+  // ✅ FUNGSI GOD ADMIN MEMBERIKAN ACC
+  const handleApprove = async (userId: string, namaUser: string) => {
+    setLoadingApprove(userId);
+    const { error } = await supabase.from('profiles').update({ is_approved: true }).eq('id', userId);
+
+    if (!error) {
+      setModal(prev => ({
+        ...prev,
+        isOpen: true,
+        type: 'success',
+        title: 'Akses Diberikan!',
+        message: `${namaUser} sekarang sudah bisa masuk ke tongkrongan.`,
+        onConfirm: closeModal,
+        onCancel: undefined
+      }));
+      setPendingUsers(prev => prev.filter(user => user.id !== userId)); // Hilangkan dari UI
+    } else {
+      setModal(prev => ({
+        ...prev,
+        isOpen: true,
+        type: 'error',
+        title: 'Gagal ACC',
+        message: 'Error: ' + error.message,
+        onConfirm: closeModal,
+        onCancel: undefined
+      }));
+    }
+    setLoadingApprove(null);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -84,7 +130,6 @@ export default function ProfilePage() {
     });
 
     if (error) {
-      // ✅ Ganti alert error dengan Modal
       setModal(prev => ({
         ...prev,
         isOpen: true,
@@ -97,7 +142,6 @@ export default function ProfilePage() {
     } else {
       setProfile(formData);
       setIsEditing(false);
-      // ✅ Ganti alert sukses dengan Modal
       setModal(prev => ({
         ...prev,
         isOpen: true,
@@ -115,14 +159,14 @@ export default function ProfilePage() {
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto min-h-screen text-slate-900">
-      <CustomModal {...modal} /> {/* ✅ RENDER MODAL DI SINI */}
+      <CustomModal {...modal} /> 
 
       <header className="mb-8 tracking-tight">
         <h2 className="text-3xl font-extrabold text-slate-950">Profil Saya 👤</h2>
         <p className="text-slate-500 mt-1">Kelola data diri dan informasi rekening untuk menerima uang jajan.</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
         {/* Kolom Kiri */}
         <div className="md:col-span-1">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 text-center shadow-sm sticky top-8">
@@ -209,6 +253,49 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* 👑 PANEL KHUSUS GOD ADMIN (Hanya Muncul Jika Email Sesuai) 👑 */}
+      {userAuth?.email === godAdminEmail && (
+        <div className="mt-8 bg-indigo-50 border border-indigo-200 rounded-3xl p-6 md:p-8 shadow-sm">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-3xl">⚡</span>
+            <h3 className="text-2xl font-black text-indigo-950 tracking-tight">Panel God Admin</h3>
+          </div>
+          <p className="text-sm text-indigo-700 font-medium mb-6">
+            Daftar buronan yang minta izin masuk ke sirkel JajanBareng.
+          </p>
+
+          {pendingUsers.length === 0 ? (
+            <div className="text-center py-10 bg-white/60 rounded-2xl border border-indigo-100 border-dashed">
+              <span className="text-4xl block mb-3">🌬️</span>
+              <p className="text-indigo-900/60 font-bold text-sm">Aman komandan, tidak ada antrean masuk saat ini.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {pendingUsers.map(user => (
+                <div key={user.id} className="bg-white p-5 rounded-2xl border border-indigo-100 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="text-center sm:text-left w-full">
+                    <h4 className="font-bold text-slate-900 text-lg">{user.nama}</h4>
+                    <div className="text-xs text-slate-500 font-medium mt-1">
+                      <p>✉️ {user.email}</p>
+                      <p className="mt-0.5">📱 {user.no_hp}</p>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={() => handleApprove(user.id, user.nama)}
+                    disabled={loadingApprove === user.id}
+                    className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-6 py-3 rounded-xl transition-all disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {loadingApprove === user.id ? 'Loading...' : '✅ ACC Akses'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

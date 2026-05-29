@@ -2,7 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase';
-import CustomModal from '@/components/CustomModal'; // ✅ Import Modal Baru
+import CustomModal from '@/components/CustomModal';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -11,8 +11,10 @@ export default function DashboardPage() {
   const [totalHutangBerjalan, setTotalHutangBerjalan] = useState(0);
   const [totalPiutangBerjalan, setTotalPiutangBerjalan] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // ✅ TAMBAHAN STATE UNTUK CEK STATUS ACC
+  const [isApproved, setIsApproved] = useState(false); 
 
-  // ✅ STATE UNTUK MODAL
   const [modal, setModal] = useState({
     isOpen: false,
     type: 'success' as 'success' | 'error' | 'warning' | 'loading',
@@ -32,8 +34,11 @@ export default function DashboardPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
     
-    const { data: profileData } = await supabase.from('profiles').select('nama').eq('id', user.id).single();
+    // ✅ Ambil data nama DAN is_approved
+    const { data: profileData } = await supabase.from('profiles').select('nama, is_approved').eq('id', user.id).single();
+    
     setCurrentUser({ id: user.id, nama: profileData?.nama || 'User' });
+    setIsApproved(profileData?.is_approved || false); // 👈 Terapkan statusnya
 
     const { data: eventsData } = await supabase
       .from('events')
@@ -54,7 +59,6 @@ export default function DashboardPage() {
     setIsLoading(false);
   };
 
-  // ✅ LOGIKA TUTUP SESI DENGAN CUSTOM MODAL (DIPERBAIKI)
   const tutupSesi = (e: React.MouseEvent, idSesi: string) => {
     e.stopPropagation();
     setModal(prev => ({
@@ -73,7 +77,6 @@ export default function DashboardPage() {
     }));
   };
 
-  // ✅ LOGIKA HAPUS SESI DENGAN CUSTOM MODAL (DIPERBAIKI)
   const hapusSesi = (e: React.MouseEvent, idSesi: string) => {
     e.stopPropagation();
     setModal(prev => ({
@@ -106,9 +109,37 @@ export default function DashboardPage() {
 
   if (isLoading) return <div className="p-12 text-center text-slate-500 font-bold animate-pulse">Memuat data dari KitaKitaSemua...</div>;
 
+  // 🛑 BLOKIR AKSES JIKA BELUM DI-ACC
+  if (!isApproved) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-900">
+        <div className="max-w-md w-full bg-white/90 p-8 rounded-3xl shadow-2xl text-center">
+          <span className="text-6xl mb-4 block">👮‍♂️</span>
+          <h2 className="text-2xl font-black text-slate-900 mb-2">SABARRRR!!</h2>
+          <p className="text-slate-600 font-medium mb-6">
+            akun mu udah ke daftar sebenarnya, tapi bang RINGO belum kasih akses. Minta ajaahhh, gk usah manja!.
+          </p>
+          <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
+            <p className="text-sm font-bold text-slate-500 mb-1">Kirim pesan / WA ke:(085162563828)</p>
+            <a href="mailto:germansiringo1234@gmail.com" className="text-amber-600 font-black text-lg hover:underline">
+              email:germansiringo1234@gmail.com
+              CEPATTTTT!!
+            </a>
+          </div>
+          <button 
+            onClick={async () => { await supabase.auth.signOut(); router.push('/login'); }}
+            className="mt-6 w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-950 transition"
+          >
+            Keluar Dulu
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 max-w-4xl mx-auto text-slate-900">
-      <CustomModal {...modal} /> {/* ✅ RENDER MODAL DI SINI */}
+      <CustomModal {...modal} />
 
       <header className="mb-8">
         <h2 className="text-3xl font-extrabold tracking-tight">Halo, {currentUser?.nama}! 👋</h2>
@@ -166,12 +197,10 @@ export default function DashboardPage() {
                     <div className="text-[11px] font-semibold text-slate-400">{sesi.partisipan_ids?.length || 0} Partisipan</div>
                   </div>
                   
-                  {/* TOMBOL MENGGUNAKAN CUSTOM MODAL */}
                   <div className="flex gap-2">
                     <button onClick={(e) => tutupSesi(e, sesi.id)} className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors border border-rose-200 opacity-0 group-hover:opacity-100 sm:flex hidden touch-manipulation">
                       Tutup
                     </button>
-                    
                     <button onClick={(e) => hapusSesi(e, sesi.id)} className="bg-slate-100 text-slate-500 hover:bg-slate-600 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors opacity-0 group-hover:opacity-100 sm:flex hidden touch-manipulation" title="Hapus Permanen">
                       🗑️
                     </button>

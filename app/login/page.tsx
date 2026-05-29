@@ -40,7 +40,7 @@ export default function LoginPage() {
     if (backgroundPhotos.length <= 1) return; // Jangan putar kalau cuma ada 1 foto
 
     const timer = setInterval(() => {
-      setCurrentPhotoIndex((prevIndex) => 
+      setCurrentPhotoIndex((prevIndex) =>
         (prevIndex + 1) % backgroundPhotos.length
       );
     }, 7000); // Ganti foto setiap 7 detik
@@ -94,7 +94,7 @@ export default function LoginPage() {
         setError('Password yang Anda masukkan salah.');
         setLoading(false);
       } else {
-        router.push('/dashboard/riwayat'); // Arahkan ke dashboard utama
+        router.push('/'); 
       }
 
     } else if (mode === 'register') {
@@ -118,7 +118,7 @@ export default function LoginPage() {
         if (avatarFile) {
           const fileExt = avatarFile.name.split('.').pop();
           const fileName = `${authData.user.id}-${Date.now()}.${fileExt}`;
-          
+
           const { error: uploadError } = await supabase.storage
             .from('avatars')
             .upload(fileName, avatarFile);
@@ -143,10 +143,11 @@ export default function LoginPage() {
         if (profileError) {
           setError('Akun berhasil dibuat, tapi gagal menyimpan profil: ' + profileError.message);
         } else {
-          setSuccessMsg('Personil baru berhasil didaftarkan! Silakan masuk menggunakan Nomor HP Anda.');
+
+          setSuccessMsg('Berhasil daftar! Tapi akunmu belum aktif. Silakan lapor ke bang RINGO, biar di ACC');
           setMode('login');
           setPassword('');
-          setAvatarFile(null); // Reset foto
+          setAvatarFile(null);
         }
       }
       setLoading(false);
@@ -157,14 +158,13 @@ export default function LoginPage() {
   return (
     // CONTAINER UTAMA - Sekarang relatif agar background bisa absolute
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-900">
-      
+
       {/* 🖼️ LAYER BACKGROUND SLIDESHOW (Auto-Generate & Auto-Rotate) */}
       {backgroundPhotos.map((photoUrl, index) => (
         <div
           key={photoUrl}
-          className={`absolute inset-0 z-0 transition-opacity duration-1000 ease-in-out ${
-            index === currentPhotoIndex ? 'opacity-30' : 'opacity-0'
-          }`}
+          className={`absolute inset-0 z-0 transition-opacity duration-1000 ease-in-out ${index === currentPhotoIndex ? 'opacity-30' : 'opacity-0'
+            }`}
           style={{
             backgroundImage: `url(${photoUrl})`,
             backgroundSize: 'cover',
@@ -178,7 +178,7 @@ export default function LoginPage() {
       {showDungeon && <DungeonPinPad onClose={() => setShowDungeon(false)} />}
 
       {/* 🤫 TOMBOL DEV BYPASS (Tetap ada di pojok) */}
-      <button 
+      <button
         type="button"
         onClick={() => setShowDungeon(true)}
         className="absolute top-4 right-4 px-3 py-1 bg-white/10 text-slate-300 text-xs font-bold rounded-lg hover:bg-white/20 transition-colors z-20 backdrop-blur-sm border border-white/10"
@@ -189,7 +189,7 @@ export default function LoginPage() {
 
       {/* BOX FORM LOGIN - Sekarang relatif z-10 agar di atas background */}
       <div className="max-w-md w-full space-y-8 bg-white/90 p-8 rounded-3xl shadow-2xl border border-white/20 relative z-10 backdrop-blur-md">
-        
+
         <div className="text-center">
           <h2 className="text-3xl font-black text-slate-950 tracking-tight">🥪 JajanBareng</h2>
           <p className="mt-2 text-sm text-slate-600 font-medium">
@@ -197,23 +197,23 @@ export default function LoginPage() {
             {mode === 'register' && 'Wajib isi data biar gak jadi buronan patungan.'}
           </p>
         </div>
-        
+
         {error && <div className="bg-rose-50 text-rose-600 p-3 rounded-xl text-sm border border-rose-100 text-center font-bold">{error}</div>}
         {successMsg && <div className="bg-emerald-50 text-emerald-700 p-3 rounded-xl text-sm border border-emerald-100 text-center font-bold">{successMsg}</div>}
 
         <form className="mt-8 space-y-4" onSubmit={handleAuth} suppressHydrationWarning>
-          
+
           {/* AREA UPLOAD FOTO PROFIL (Hanya Muncul saat Register - Padding Besar) */}
           {mode === 'register' && (
             <div className="p-5 sm:p-6 border-2 border-dashed border-amber-200 rounded-2xl bg-amber-50 text-center mb-6 shadow-inner">
               <span className="text-3xl mb-2 block">📷</span>
               <label className="text-xs font-black text-amber-900 block mb-1">Pasang Komuk Terganteng/Tercantik</label>
               <p className="text-[10px] text-amber-700 mb-3">Format JPG/PNG, maksimal 2MB ya bwang.</p>
-              <input 
-                type="file" 
+              <input
+                type="file"
                 accept="image/*"
                 onChange={(e) => setAvatarFile(e.target.files?.[0] || null)} // 👈 TANGKAP FILE-NYA
-                className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 transition-colors cursor-pointer" 
+                className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 transition-colors cursor-pointer"
               />
             </div>
           )}
@@ -265,7 +265,7 @@ export default function LoginPage() {
               />
             </div>
           )}
-          
+
           {mode !== 'forgot_password' && (
             <div>
               <div className="flex justify-between items-center mb-1">
@@ -289,8 +289,8 @@ export default function LoginPage() {
             className="w-full mt-6 py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 text-sm"
           >
             {loading ? 'Sabar, lagi manggil Supabase...' : (
-              mode === 'login' ? 'Masuk Markas 🚀' : 
-              mode === 'register' ? 'Daftar Jadi Personil 🔥' : 'Kirim Link Reset'
+              mode === 'login' ? 'Masuk Markas 🚀' :
+                mode === 'register' ? 'Daftar Jadi Personil 🔥' : 'Kirim Link Reset'
             )}
           </button>
         </form>
