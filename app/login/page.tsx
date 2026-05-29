@@ -162,7 +162,7 @@ export default function LoginPage() {
         className="absolute top-4 right-4 px-3 py-1 bg-white/10 text-slate-300 text-xs font-bold rounded-lg hover:bg-white/20 transition-colors z-20 backdrop-blur-sm border border-white/10"
         title="Masuk markas tanpa ngetik (Dev Mode)"
       >
-        🤫 Pintu Belakang
+        🤫 Hack Kalau Bisa!
       </button>
 
       {/* BOX FORM LOGIN - Sekarang relatif z-10 agar di atas background */}
