@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/utils/supabase';
+import { supabase } from '@/utils/supabase'; // ✅ Pakai util Supabase
+import CustomModal from '@/components/CustomModal'; // ✅ Import Custom Modal
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -17,13 +18,23 @@ export default function ProfilePage() {
 
   const daftarBank = ['BCA', 'Mandiri', 'BNI', 'BRI', 'BSI', 'GoPay', 'OVO', 'DANA', 'ShopeePay', 'Bank Jago', 'SeaBank'];
 
+  // ✅ STATE UNTUK CUSTOM MODAL
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: 'success' as 'success' | 'error' | 'warning' | 'loading',
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    onCancel: undefined as (() => void) | undefined
+  });
+  const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
+
   useEffect(() => {
     fetchProfile();
   }, []);
 
   const fetchProfile = async () => {
     try {
-      // 1. Dapatkan User Login
       const { data: { user }, error: authError } = await supabase.auth.getUser();
 
       if (authError || !user) {
@@ -32,25 +43,23 @@ export default function ProfilePage() {
       }
       setUserAuth(user);
 
-      // 2. Tarik data profil dengan error handling yang lebih baik
-      const { data: profile, error: profileError } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .maybeSingle(); // Menggunakan .maybeSingle() agar tidak error kalau data kosong
+        .maybeSingle();
 
-      // 3. Tentukan data final
-      const finalData = profile
-        ? { ...profile, email: user.email || '' }
+      const finalData = profileData
+        ? { ...profileData, email: user.email || '' }
         : {
           nama: user.email?.split('@')[0] || 'User',
           email: user.email || '',
           no_hp: '',
           nama_bank: '',
-          no_rekening: ''
+          no_rekening: '',
+          avatar_url: ''
         };
 
-      // 4. Update State
       setProfile(finalData);
       setFormData(finalData);
     } catch (err) {
@@ -64,7 +73,6 @@ export default function ProfilePage() {
     e.preventDefault();
     setLoading(true);
 
-    // 3. Simpan permanen ke Supabase Database
     const { error } = await supabase.from('profiles').upsert({
       id: userAuth.id,
       nama: formData.nama,
@@ -74,11 +82,29 @@ export default function ProfilePage() {
     });
 
     if (error) {
-      alert('Gagal menyimpan data: ' + error.message);
+      // ✅ Ganti alert error dengan Modal
+      setModal(prev => ({
+        ...prev,
+        isOpen: true,
+        type: 'error',
+        title: 'Gagal Menyimpan',
+        message: 'Terjadi kesalahan: ' + error.message,
+        onConfirm: closeModal,
+        onCancel: undefined
+      }));
     } else {
       setProfile(formData);
       setIsEditing(false);
-      alert('Profil berhasil disimpan ke Database!');
+      // ✅ Ganti alert sukses dengan Modal
+      setModal(prev => ({
+        ...prev,
+        isOpen: true,
+        type: 'success',
+        title: 'Tersimpan!',
+        message: 'Profil berhasil diperbarui di Database.',
+        onConfirm: closeModal,
+        onCancel: undefined
+      }));
     }
     setLoading(false);
   };
@@ -87,6 +113,8 @@ export default function ProfilePage() {
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto min-h-screen text-slate-900">
+      <CustomModal {...modal} /> {/* ✅ RENDER MODAL DI SINI */}
+
       <header className="mb-8 tracking-tight">
         <h2 className="text-3xl font-extrabold text-slate-950">Profil Saya 👤</h2>
         <p className="text-slate-500 mt-1">Kelola data diri dan informasi rekening untuk menerima uang jajan.</p>
@@ -127,7 +155,7 @@ export default function ProfilePage() {
             <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h3 className="font-bold text-lg">Informasi Akun</h3>
               {!isEditing && (
-                <button onClick={() => setIsEditing(true)} className="text-sm bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 shadow-sm">
+                <button onClick={() => setIsEditing(true)} className="text-sm bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl hover:bg-slate-50 shadow-sm transition-colors touch-manipulation">
                   Edit Profil
                 </button>
               )}
@@ -170,8 +198,8 @@ export default function ProfilePage() {
 
                 {isEditing && (
                   <div className="pt-6 border-t border-slate-100 flex gap-3 justify-end">
-                    <button type="button" onClick={() => { setIsEditing(false); setFormData(profile); }} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 text-sm">Batal</button>
-                    <button type="submit" disabled={loading} className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-sm disabled:opacity-70 text-sm">{loading ? 'Menyimpan...' : '💾 Simpan ke Database'}</button>
+                    <button type="button" onClick={() => { setIsEditing(false); setFormData(profile); }} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 text-sm touch-manipulation">Batal</button>
+                    <button type="submit" disabled={loading} className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-sm disabled:opacity-70 text-sm touch-manipulation">{loading ? 'Menyimpan...' : '💾 Simpan ke Database'}</button>
                   </div>
                 )}
               </form>

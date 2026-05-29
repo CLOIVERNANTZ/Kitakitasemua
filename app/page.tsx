@@ -2,94 +2,141 @@
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase';
-
+import CustomModal from '@/components/CustomModal'; // ✅ Import Modal Baru
 
 export default function DashboardPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [totalHutangBerjalan, setTotalHutangBerjalan] = useState(0);
+  const [totalPiutangBerjalan, setTotalPiutangBerjalan] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+
+  // ✅ STATE UNTUK MODAL
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: 'success' as 'success' | 'error' | 'warning' | 'loading',
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    onCancel: undefined as (() => void) | undefined
+  });
+
+  const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
 
- const fetchDashboardData = async () => {
+  const fetchDashboardData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
     
     const { data: profileData } = await supabase.from('profiles').select('nama').eq('id', user.id).single();
     setCurrentUser({ id: user.id, nama: profileData?.nama || 'User' });
 
-    // REVISI UTAMA: Tambahkan .eq('status', 'Open') agar beranda bersih
     const { data: eventsData } = await supabase
       .from('events')
       .select('*')
-      .contains('partisipan_ids', [user.id])
-      .eq('status', 'Open') // 🌟 Kunci penyelamatnya di sini!
+      .eq('status', 'Open')
       .order('created_at', { ascending: false });
 
     if (eventsData) setHistory(eventsData);
 
     const { data: tagihanData } = await supabase
-      .from('tagihan')
-      .select('nominal')
-      .eq('dari_user_id', user.id)
-      .eq('status', 'Belum Bayar');
+      .from('tagihan').select('nominal').eq('dari_user_id', user.id).eq('status', 'Belum Bayar');
+    if (tagihanData) setTotalHutangBerjalan(tagihanData.reduce((sum, tf) => sum + Number(tf.nominal), 0));
 
-    if (tagihanData) {
-      const hutangSaya = tagihanData.reduce((sum, tf) => sum + Number(tf.nominal), 0);
-      setTotalHutangBerjalan(hutangSaya);
-    }
+    const { data: piutangData } = await supabase
+      .from('tagihan').select('nominal').eq('ke_user_id', user.id).eq('status', 'Belum Bayar');
+    if (piutangData) setTotalPiutangBerjalan(piutangData.reduce((sum, tf) => sum + Number(tf.nominal), 0));
     
     setIsLoading(false);
   };
 
-  const tutupSesi = async (e: React.MouseEvent, idSesi: string) => {
-    e.stopPropagation(); 
-    if (!window.confirm('Tutup acara ini? Peserta tidak bisa lagi mengedit.')) return;
-
-    await supabase.from('events').update({ status: 'Closed' }).eq('id', idSesi);
-    setHistory(history.map(h => h.id === idSesi ? { ...h, status: 'Closed' } : h));
+  // ✅ LOGIKA TUTUP SESI DENGAN CUSTOM MODAL (DIPERBAIKI)
+  const tutupSesi = (e: React.MouseEvent, idSesi: string) => {
+    e.stopPropagation();
+    setModal(prev => ({
+      ...prev,
+      isOpen: true,
+      type: 'warning',
+      title: 'Kunci Sesi?',
+      message: 'Setelah ditutup, peserta tidak bisa lagi mengedit keranjang. Tagihan akan dikunci.',
+      onCancel: closeModal,
+      onConfirm: async () => {
+        setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Memproses...', message: 'Menutup sesi dan menyiapkan tagihan...', onCancel: undefined }));
+        await supabase.from('events').update({ status: 'Closed' }).eq('id', idSesi);
+        setHistory(history.filter(h => h.id !== idSesi));
+        setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Berhasil!', message: 'Sesi telah ditutup.', onConfirm: closeModal }));
+      }
+    }));
   };
 
-  // ==========================================
-  // FUNGSI BARU: PENGARAH HALAMAN PINTAR
-  // ==========================================
+  // ✅ LOGIKA HAPUS SESI DENGAN CUSTOM MODAL (DIPERBAIKI)
+  const hapusSesi = (e: React.MouseEvent, idSesi: string) => {
+    e.stopPropagation();
+    setModal(prev => ({
+      ...prev,
+      isOpen: true,
+      type: 'error',
+      title: 'Hapus Permanen?',
+      message: 'Seluruh data ekstra dan tagihan yang terhubung dengan proyek ini akan lenyap selamanya.',
+      onCancel: closeModal,
+      onConfirm: async () => {
+        setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Menghapus...', message: 'Melenyapkan data dari sistem...', onCancel: undefined }));
+        await supabase.from('tagihan').delete().eq('event_id', idSesi);
+        const { error } = await supabase.from('events').delete().eq('id', idSesi);
+        if (!error) {
+          setHistory(history.filter(h => h.id !== idSesi));
+          setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Terhapus!', message: 'Data telah musnah dari database.', onConfirm: closeModal }));
+        } else {
+          setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: error.message, onConfirm: closeModal }));
+        }
+      }
+    }));
+  };
+
   const handleKlikSesi = (sesi: any) => {
-    if (sesi.tipe_acara === 'JAJAN') {
-      router.push(`/jajan/${sesi.id}`); // Masuk ke 3 Tab Navigasi Jajan
-    } else if (sesi.tipe_acara === 'PROJECT') {
-      router.push(`/dashboard/lapak`); // Masuk ke Grid Excel
-    } else if (sesi.tipe_acara === 'NGINAP') {
-      router.push(`/dashboard/nginap`); // Masuk ke Form Nginap
-    } else {
-      router.push(`/jajan/${sesi.id}`); // Fallback darurat
-    }
+    if (sesi.tipe_acara === 'JAJAN') router.push(`/jajan/${sesi.id}`); 
+    else if (sesi.tipe_acara === 'PROJECT') router.push(`/dashboard/lapak?id=${sesi.id}`);
+    else if (sesi.tipe_acara === 'NGINAP') router.push(`/dashboard/nginap?viewId=${sesi.id}`);
+    else router.push(`/jajan/${sesi.id}`);
   };
 
   if (isLoading) return <div className="p-12 text-center text-slate-500 font-bold animate-pulse">Memuat data dari KitaKitaSemua...</div>;
 
   return (
     <div className="p-8 max-w-4xl mx-auto text-slate-900">
+      <CustomModal {...modal} /> {/* ✅ RENDER MODAL DI SINI */}
+
       <header className="mb-8">
         <h2 className="text-3xl font-extrabold tracking-tight">Halo, {currentUser?.nama}! 👋</h2>
         <p className="text-slate-500 mt-1">Dashboard real-time dari database KitaKitaSemua.</p>
       </header>
 
-      {/* WIDGET TOTAL HUTANG */}
-      <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center mb-10 relative overflow-hidden">
-        <div className="absolute top-0 w-full h-2 bg-rose-500"></div>
-        <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-3xl mb-4 border border-rose-100">💸</div>
-        <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Total Hutang Berjalan Anda</p>
-        <h4 className="text-4xl font-black text-slate-900 mt-2">Rp {totalHutangBerjalan.toLocaleString('id-ID')}</h4>
-        {totalHutangBerjalan > 0 && (
-          <button onClick={() => router.push('/dashboard/riwayat')} className="mt-6 bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold px-6 py-2.5 rounded-full text-sm border border-rose-200 transition-colors">
-            Lihat Rincian & Bayar
-          </button>
-        )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
+          <div className="absolute top-0 w-full h-2 bg-rose-500"></div>
+          <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-rose-100">💸</div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hutang Berjalan Anda</p>
+          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {totalHutangBerjalan.toLocaleString('id-ID')}</h4>
+        </div>
+        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
+          <div className="absolute top-0 w-full h-2 bg-emerald-500"></div>
+          <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-emerald-100">🤑</div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Piutang (Uang Anda)</p>
+          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {totalPiutangBerjalan.toLocaleString('id-ID')}</h4>
+        </div>
       </div>
+
+      {(totalHutangBerjalan > 0 || totalPiutangBerjalan > 0) && (
+        <div className="text-center mb-10">
+          <button onClick={() => router.push('/dashboard/riwayat')} className="bg-slate-900 text-white hover:bg-slate-800 font-bold px-8 py-3.5 rounded-2xl text-sm shadow-md transition-colors flex items-center justify-center gap-2 w-full md:w-auto mx-auto">
+            Lihat Rincian Penagihan ➔
+          </button>
+        </div>
+      )}
 
       <div>
         <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><span>🎯</span> Project & Sesi Saya</h3>
@@ -97,23 +144,18 @@ export default function DashboardPage() {
           {history.length === 0 ? (
             <div className="p-12 text-center flex flex-col items-center">
               <span className="text-4xl mb-3 opacity-50">📭</span>
-              <span className="text-slate-500 font-medium">Belum ada project yang diikuti.</span>
+              <span className="text-slate-500 font-medium">Belum ada project yang terbuka.</span>
             </div>
           ) : (
             history.map(sesi => (
               <div key={sesi.id} onClick={() => handleKlikSesi(sesi)} className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center hover:bg-slate-50 cursor-pointer transition-colors gap-3 group">
-                {/* TOMBOL ONCLICK DI SINI SUDAH DIGANTI */}
                 <div>
                   <div className="font-bold text-slate-900 text-lg flex items-center gap-2">
                     {sesi.nama_acara}
                     <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${sesi.tipe_acara === 'JAJAN' ? 'bg-amber-100 text-amber-700' : sesi.tipe_acara === 'PROJECT' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                       {sesi.tipe_acara}
                     </span>
-                    {sesi.status === 'Open' ? (
-                      <span className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 rounded-md animate-pulse uppercase">Berjalan</span>
-                    ) : (
-                      <span className="bg-slate-200 text-slate-500 text-[10px] px-2 py-0.5 rounded-md uppercase font-semibold">Selesai</span>
-                    )}
+                    <span className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 rounded-md animate-pulse uppercase font-bold">Berjalan</span>
                   </div>
                   <div className="text-xs text-slate-500 mt-1 font-medium">{sesi.tanggal}</div>
                 </div>
@@ -124,11 +166,16 @@ export default function DashboardPage() {
                     <div className="text-[11px] font-semibold text-slate-400">{sesi.partisipan_ids?.length || 0} Partisipan</div>
                   </div>
                   
-                  {sesi.status === 'Open' && (
-                    <button onClick={(e) => tutupSesi(e, sesi.id)} className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors border border-rose-200 opacity-0 group-hover:opacity-100 sm:flex hidden">
+                  {/* TOMBOL MENGGUNAKAN CUSTOM MODAL */}
+                  <div className="flex gap-2">
+                    <button onClick={(e) => tutupSesi(e, sesi.id)} className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors border border-rose-200 opacity-0 group-hover:opacity-100 sm:flex hidden touch-manipulation">
                       Tutup
                     </button>
-                  )}
+                    
+                    <button onClick={(e) => hapusSesi(e, sesi.id)} className="bg-slate-100 text-slate-500 hover:bg-slate-600 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors opacity-0 group-hover:opacity-100 sm:flex hidden touch-manipulation" title="Hapus Permanen">
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               </div>
             ))

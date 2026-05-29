@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { supabase } from '@/utils/supabase';
+import { supabase } from '@/utils/supabase'; // ✅ Memakai file utils/supabase yang benar
 
 // --- INTERFACE DATA ---
 interface Anggota {
@@ -15,10 +15,22 @@ interface Anggota {
 
 type TipePembagian = 'sendiri' | 'dibagi_rata' | 'dibebankan';
 
+// Struktur disesuaikan dengan Database baru
 interface ItemPesanan {
-  id: string; user_id: string; nama_menu: string; catatan: string; harga: number; qty: number;
-  tipe_pembagian: TipePembagian; penanggung_id: string; is_ppn_included: boolean; ppn_rate: number; sudah_diterima: boolean;
+  id?: string; 
+  event_id?: string;
+  user_id: string; 
+  nama_menu: string; 
+  catatan: string; 
+  harga: number; 
+  qty: number;
+  tipe_pembagian: TipePembagian; 
+  penanggung_id: string | null; 
+  is_ppn_included: boolean; 
+  ppn_rate: number; 
+  sudah_diterima: boolean;
 }
+
 interface DetailStruk { id_item: string; tipe: string; deskripsi: string; nominal: number; }
 
 export default function SesiJajanPage() {
@@ -33,18 +45,19 @@ export default function SesiJajanPage() {
   const [daftarWarung, setDaftarWarung] = useState<string[]>([]);
 
   const [anggota, setAnggota] = useState<Anggota[]>([]);
-
   const [namaSesi, setNamaSesi] = useState('');
   const [tanggal, setTanggal] = useState(new Date().toISOString().split('T')[0]);
   const [warungTerpilih, setWarungTerpilih] = useState('');
   const [pahlawanIds, setPahlawanIds] = useState<string[]>([]);
+  
+  // ✅ Ini sekarang murni ditarik dari tabel 'event_items'
   const [items, setItems] = useState<ItemPesanan[]>([]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [hargaInput, setHargaInput] = useState<string>('');
 
-  const [formItem, setFormItem] = useState<Omit<ItemPesanan, 'id' | 'harga' | 'sudah_diterima'>>({
-    user_id: '1', nama_menu: '', catatan: '', qty: 1, tipe_pembagian: 'sendiri', penanggung_id: '',
+  const [formItem, setFormItem] = useState<Omit<ItemPesanan, 'id' | 'event_id' | 'harga' | 'sudah_diterima'>>({
+    user_id: '', nama_menu: '', catatan: '', qty: 1, tipe_pembagian: 'sendiri', penanggung_id: '',
     is_ppn_included: true, ppn_rate: 11
   });
 
@@ -57,6 +70,7 @@ export default function SesiJajanPage() {
       const { data: profilesData } = await supabase.from('profiles').select('id, nama, nama_bank, no_rekening');
       if (profilesData) {
         setAnggota(profilesData as Anggota[]);
+        setFormItem(prev => ({ ...prev, user_id: user.id })); // Default user pengisi form
         setPahlawanIds(prev => prev.length === 0 ? [user.id] : prev);
       }
 
@@ -64,65 +78,64 @@ export default function SesiJajanPage() {
       if (warungData) setDaftarWarung(warungData.map(w => w.nama));
 
       if (sessionId) {
+        // Tarik data Induk (Acara)
         const { data: eventData } = await supabase.from('events').select('*').eq('id', sessionId).single();
         if (eventData) {
           setNamaSesi(eventData.nama_acara);
           setTanggal(eventData.tanggal);
           setPahlawanIds(eventData.pahlawan_ids || []);
           setStatusSesi(eventData.status);
-
-          if (eventData.data_ekstra) {
-            setWarungTerpilih(eventData.data_ekstra.warung || '');
-            setItems(eventData.data_ekstra.items || []);
-          }
+          if (eventData.data_ekstra) setWarungTerpilih(eventData.data_ekstra.warung || '');
           setIsSesiOpen(true);
         }
+
+        // ✅ Tarik data Anak (Item Pesanan) secara terpisah
+        const { data: itemsData } = await supabase.from('event_items').select('*').eq('event_id', sessionId);
+        if (itemsData) setItems(itemsData as ItemPesanan[]);
       }
     };
 
     fetchInitialData();
 
-    // Listener Real-time
-    const channel = supabase
-      .channel(`jajan-session-${sessionId}`)
+    // ✅ REAL-TIME DIPERBARUI: Sekarang kita pantau tabel 'event_items'
+    const channelItems = supabase
+      .channel(`items-session-${sessionId}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'events', filter: `id=eq.${sessionId}` },
-        (payload) => {
-          const updatedData = payload.new as any;
-          if (updatedData.data_ekstra) {
-            setItems(updatedData.data_ekstra.items || []);
-            setWarungTerpilih(updatedData.data_ekstra.warung || '');
-          }
-          setPahlawanIds(updatedData.pahlawan_ids || []);
-          setStatusSesi(updatedData.status || 'Open');
+        { event: '*', schema: 'public', table: 'event_items', filter: `event_id=eq.${sessionId}` },
+        async () => {
+          // Jika ada perubahan item dari teman, tarik ulang data item terbaru
+          const { data } = await supabase.from('event_items').select('*').eq('event_id', sessionId);
+          if (data) setItems(data as ItemPesanan[]);
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(channelItems);
     };
   }, [sessionId, router]);
 
-  const simpanInformasiSesiKeDB = async (newPahlawanIds: string[] = pahlawanIds, newItems: ItemPesanan[] = items) => {
-    if (statusSesi === 'Closed') return; // Mencegah update jika sudah ditutup
+  // Fungsi menyimpan Induk (Warung & Pahlawan)
+  const simpanInformasiSesiKeDB = async (newPahlawanIds: string[] = pahlawanIds) => {
+    if (statusSesi === 'Closed') return;
 
     const creatorId = currentUser?.id ? [currentUser.id] : [];
-    const partisipanSet = new Set([...creatorId, ...newPahlawanIds, ...newItems.map(i => i.user_id)]);
+    const partisipanSet = new Set([...creatorId, ...newPahlawanIds, ...items.map(i => i.user_id)]);
     const partisipanArray = Array.from(partisipanSet);
 
     if (warungTerpilih && !daftarWarung.includes(warungTerpilih)) {
-      const { error: warungErr } = await supabase.from('warung').insert({ nama: warungTerpilih });
-      if (!warungErr) setDaftarWarung(prev => [...prev, warungTerpilih]);
+      await supabase.from('warung').insert({ nama: warungTerpilih });
     }
 
-    const totalSementara = newItems.reduce((sum, item) => {
+    // Hitung total sementara dari State
+    const totalSementara = items.reduce((sum, item) => {
       const base = item.harga * item.qty;
       const ppn = item.is_ppn_included ? 0 : (base * item.ppn_rate / 100);
       return sum + base + ppn;
     }, 0);
 
+    // Update hanya tabel Induk (Events)
     await supabase.from('events').upsert({
       id: sessionId,
       tipe_acara: 'JAJAN',
@@ -132,7 +145,7 @@ export default function SesiJajanPage() {
       total_biaya: totalSementara,
       pahlawan_ids: newPahlawanIds,
       partisipan_ids: partisipanArray,
-      data_ekstra: { items: newItems, warung: warungTerpilih }
+      data_ekstra: { warung: warungTerpilih } // Item dihapus dari sini!
     });
   };
 
@@ -142,7 +155,6 @@ export default function SesiJajanPage() {
     if (!window.confirm('Tutup sesi jajan ini? Status akan dikunci dan tagihan final akan dikirim ke teman-teman.')) return;
 
     const newSessionTransfers: any[] = [];
-
     rekapanAkhir.forEach(m => {
       if (!pahlawanIds.includes(m.id) && m.totalBeban > 0) {
         const nominalPerPahlawan = m.totalBeban / pahlawanIds.length;
@@ -161,22 +173,13 @@ export default function SesiJajanPage() {
 
     if (newSessionTransfers.length > 0) {
       const { error: tfError } = await supabase.from('tagihan').insert(newSessionTransfers);
-      if (tfError) {
-        alert("Gagal menyebarkan tagihan: " + tfError.message);
-        return;
-      }
+      if (tfError) { alert("Gagal menyebarkan tagihan: " + tfError.message); return; }
     }
 
-    const { error: eventError } = await supabase
-      .from('events')
-      .update({ status: 'Closed' })
-      .eq('id', sessionId);
-
-    if (!eventError) {
-      setStatusSesi('Closed');
-      alert('Sesi berhasil ditutup! Tagihan resmi disebarkan.');
-      setActiveTab('rekapan');
-    }
+    await supabase.from('events').update({ status: 'Closed' }).eq('id', sessionId);
+    setStatusSesi('Closed');
+    alert('Sesi berhasil ditutup! Tagihan resmi disebarkan.');
+    setActiveTab('rekapan');
   };
 
   const handleBukaSesi = async () => {
@@ -184,22 +187,68 @@ export default function SesiJajanPage() {
     await simpanInformasiSesiKeDB();
   };
 
-  const handleHargaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setHargaInput(e.target.value.replace(/\D/g, ''));
-  };
-
   const togglePahlawan = async (id: string) => {
     if (statusSesi === 'Closed') return;
     const newPahlawanIds = pahlawanIds.includes(id) ? pahlawanIds.filter(pid => pid !== id) : [...pahlawanIds, id];
     setPahlawanIds(newPahlawanIds);
-    if (isSesiOpen) await simpanInformasiSesiKeDB(newPahlawanIds, items);
+    if (isSesiOpen) await simpanInformasiSesiKeDB(newPahlawanIds);
   };
 
-  const toggleDiterima = async (itemId: string) => {
+  // ✅ SIMPAN PESANAN LANGSUNG KE TABEL event_items
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (statusSesi === 'Closed') return;
-    const newItems = items.map(i => i.id === itemId ? { ...i, sudah_diterima: !i.sudah_diterima } : i);
-    setItems(newItems);
-    await simpanInformasiSesiKeDB(pahlawanIds, newItems);
+    const finalHarga = hargaInput === '' ? 0 : Number(hargaInput);
+    
+    const itemData = {
+      event_id: sessionId,
+      user_id: formItem.user_id,
+      nama_menu: formItem.nama_menu,
+      catatan: formItem.catatan,
+      harga: finalHarga,
+      qty: formItem.qty,
+      tipe_pembagian: formItem.tipe_pembagian,
+      penanggung_id: formItem.penanggung_id || null, // null jika kosong
+      is_ppn_included: formItem.is_ppn_included,
+      ppn_rate: formItem.ppn_rate,
+      sudah_diterima: false
+    };
+
+    if (editingId) {
+      await supabase.from('event_items').update(itemData).eq('id', editingId);
+    } else {
+      await supabase.from('event_items').insert([itemData]);
+    }
+
+    // Trigger update total harga di tabel events
+    simpanInformasiSesiKeDB();
+
+    setEditingId(null);
+    setFormItem({ user_id: currentUser?.id || '', nama_menu: '', catatan: '', qty: 1, tipe_pembagian: 'sendiri', penanggung_id: '', is_ppn_included: true, ppn_rate: 11 });
+    setHargaInput('');
+    setActiveTab('hasil');
+  };
+
+  // ✅ KLIK TERIMA PESANAN (UPDATE SATU BARIS)
+  const toggleDiterima = async (item: ItemPesanan) => {
+    if (statusSesi === 'Closed' || !item.id) return;
+    await supabase.from('event_items').update({ sudah_diterima: !item.sudah_diterima }).eq('id', item.id);
+  };
+
+  const handleEditClick = (item: ItemPesanan) => {
+    if (!item.id) return;
+    setEditingId(item.id);
+    setHargaInput(item.harga === 0 ? '' : item.harga.toString());
+    setFormItem({ user_id: item.user_id, nama_menu: item.nama_menu, catatan: item.catatan, qty: item.qty, tipe_pembagian: item.tipe_pembagian, penanggung_id: item.penanggung_id || '', is_ppn_included: item.is_ppn_included, ppn_rate: item.ppn_rate });
+    setActiveTab('pemesanan');
+  };
+
+  // HAPUS PESANAN
+  const handleDeleteItem = async (itemId?: string) => {
+    if (statusSesi === 'Closed' || !itemId) return;
+    if (!window.confirm("Hapus pesanan ini?")) return;
+    await supabase.from('event_items').delete().eq('id', itemId);
+    simpanInformasiSesiKeDB();
   };
 
   const hitungRekapan = () => {
@@ -213,20 +262,26 @@ export default function SesiJajanPage() {
       const totalHargaItem = baseTotal + ppnTotal;
       totalSesi += totalHargaItem;
       const pemesan = anggota.find(a => a.id === item.user_id);
-      if (!pemesan) return;
+      if (!pemesan || !item.id) return;
 
       const bebankanKeOrang = (targetId: string, nominal: number, tipe: string, deskripsi: string) => {
         const target = anggota.find(a => a.id === targetId);
         const teksPpn = !item.is_ppn_included && item.harga > 0 ? ` (+PPN ${item.ppn_rate}%)` : '';
         if (target?.sponsor_utama_id) {
-          strukPerOrang[target.sponsor_utama_id].push({ id_item: item.id, tipe: tipe === 'Bagi Rata' ? 'Tanggungan Bagi Rata' : 'Tanggungan', deskripsi: `${deskripsi}${teksPpn} (${target.nama})`, nominal });
+          strukPerOrang[target.sponsor_utama_id].push({ id_item: item.id as string, tipe: tipe === 'Bagi Rata' ? 'Tanggungan Bagi Rata' : 'Tanggungan', deskripsi: `${deskripsi}${teksPpn} (${target.nama})`, nominal });
         } else {
-          strukPerOrang[targetId].push({ id_item: item.id, tipe, deskripsi: `${deskripsi}${teksPpn}`, nominal });
+          if(strukPerOrang[targetId]) {
+            strukPerOrang[targetId].push({ id_item: item.id as string, tipe, deskripsi: `${deskripsi}${teksPpn}`, nominal });
+          }
         }
       };
 
       if (item.tipe_pembagian === 'sendiri') bebankanKeOrang(pemesan.id, totalHargaItem, 'Pribadi', item.nama_menu);
-      else if (item.tipe_pembagian === 'dibebankan' && item.penanggung_id) strukPerOrang[item.penanggung_id].push({ id_item: item.id, tipe: 'Traktir', deskripsi: `${item.nama_menu} (Traktir ${pemesan.nama})`, nominal: totalHargaItem });
+      else if (item.tipe_pembagian === 'dibebankan' && item.penanggung_id) {
+         if(strukPerOrang[item.penanggung_id]) {
+            strukPerOrang[item.penanggung_id].push({ id_item: item.id, tipe: 'Traktir', deskripsi: `${item.nama_menu} (Traktir ${pemesan.nama})`, nominal: totalHargaItem });
+         }
+      }
       else if (item.tipe_pembagian === 'dibagi_rata') {
         const perOrang = totalHargaItem / anggota.length;
         anggota.forEach(a => bebankanKeOrang(a.id, perOrang, 'Bagi Rata', item.nama_menu));
@@ -234,35 +289,13 @@ export default function SesiJajanPage() {
     });
 
     const rekapanAkhir = anggota.map(a => {
-      const Glen = strukPerOrang[a.id];
+      const Glen = strukPerOrang[a.id] || [];
       return { ...a, isPahlawan: pahlawanIds.includes(a.id), struk: Glen, totalBeban: Glen.reduce((sum, current) => sum + current.nominal, 0) };
     });
     return { totalSesi, rekapanAkhir };
   };
 
   const { totalSesi, rekapanAkhir } = hitungRekapan();
-
-  const handleSaveItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (statusSesi === 'Closed') return;
-    const finalHarga = hargaInput === '' ? 0 : Number(hargaInput);
-    const newItems = editingId ? items.map(item => item.id === editingId ? { ...item, ...formItem, harga: finalHarga } : item) : [...items, { id: 'idx_' + Date.now(), ...formItem, harga: finalHarga, sudah_diterima: false }];
-
-    setEditingId(null);
-    setItems(newItems);
-    await simpanInformasiSesiKeDB(pahlawanIds, newItems);
-
-    setFormItem({ user_id: '1', nama_menu: '', catatan: '', qty: 1, tipe_pembagian: 'sendiri', penanggung_id: '', is_ppn_included: true, ppn_rate: 11 });
-    setHargaInput('');
-    setActiveTab('hasil');
-  };
-
-  const handleEditClick = (item: ItemPesanan) => {
-    setEditingId(item.id);
-    setHargaInput(item.harga === 0 ? '' : item.harga.toString());
-    setFormItem({ user_id: item.user_id, nama_menu: item.nama_menu, catatan: item.catatan, qty: item.qty, tipe_pembagian: item.tipe_pembagian, penanggung_id: item.penanggung_id, is_ppn_included: item.is_ppn_included, ppn_rate: item.ppn_rate });
-    setActiveTab('pemesanan');
-  };
 
   const sortedItems = [...items].sort((a, b) => {
     if (a.sudah_diterima !== b.sudah_diterima) return a.sudah_diterima ? 1 : -1;
@@ -327,7 +360,11 @@ export default function SesiJajanPage() {
 
             {isSesiOpen && statusSesi === 'Open' && (
               <div className="bg-white p-6 rounded-2xl border shadow-sm">
-                <h3 className="font-bold mb-4">{editingId ? 'Edit Pesanan' : 'Tambah Pesanan Baru'}</h3>
+                <div className="flex justify-between items-center border-b pb-2 mb-4">
+                  <h3 className="font-bold">{editingId ? '✏️ Edit Pesanan' : '🍔 Tambah Pesanan Baru'}</h3>
+                  {editingId && <button onClick={() => {setEditingId(null); setFormItem(prev => ({...prev, nama_menu: '', catatan: '', qty: 1})); setHargaInput('')}} className="text-xs text-rose-500 font-bold">Batal Edit</button>}
+                </div>
+                
                 <form onSubmit={handleSaveItem} className="space-y-4">
                   <div><label className="text-xs font-medium block mb-1">Siapa yang Makan?</label><select value={formItem.user_id} onChange={(e) => setFormItem({ ...formItem, user_id: e.target.value })} className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm font-semibold">{anggota.map(a => <option key={a.id} value={a.id}>{a.nama}</option>)}</select></div>
                   <div><label className="text-xs font-medium block mb-1">Nama Menu</label><input type="text" required value={formItem.nama_menu} onChange={(e) => setFormItem({ ...formItem, nama_menu: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" /></div>
@@ -335,7 +372,7 @@ export default function SesiJajanPage() {
                   <div className="grid grid-cols-3 gap-3 items-end">
                     <div className="col-span-2">
                       <label className="text-xs font-medium block mb-1">Harga Satuan</label>
-                      <div className="relative"><span className="absolute left-3 top-2 text-sm text-slate-400 font-medium">Rp</span><input type="text" placeholder="TBD" value={hargaInput === '0' || hargaInput === '' ? '' : Number(hargaInput).toLocaleString('id-ID')} onChange={handleHargaChange} className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm font-bold" /></div>
+                      <div className="relative"><span className="absolute left-3 top-2 text-sm text-slate-400 font-medium">Rp</span><input type="text" placeholder="TBD" value={hargaInput === '0' || hargaInput === '' ? '' : Number(hargaInput).toLocaleString('id-ID')} onChange={(e) => setHargaInput(e.target.value.replace(/\D/g, ''))} className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm font-bold" /></div>
                     </div>
                     <div><label className="text-xs font-medium block mb-1">Qty</label><input type="number" step="any" min="0.1" required value={formItem.qty} onChange={(e) => setFormItem({ ...formItem, qty: Number(e.target.value) })} className="w-full px-3 py-2 border rounded-xl text-sm" /></div>
                   </div>
@@ -344,8 +381,8 @@ export default function SesiJajanPage() {
                     {!formItem.is_ppn_included && (<div className="pl-6 flex items-center gap-2"><span className="text-xs text-slate-500">Tambahkan PPN:</span><select value={formItem.ppn_rate} onChange={(e) => setFormItem({ ...formItem, ppn_rate: Number(e.target.value) })} className="px-2 py-1 text-sm border rounded bg-white"><option value={10}>10%</option><option value={11}>11%</option><option value={12}>12%</option></select></div>)}
                   </div>
                   <div><label className="text-xs font-medium block mb-1">Skema Bayar</label><select value={formItem.tipe_pembagian} onChange={(e) => setFormItem({ ...formItem, tipe_pembagian: e.target.value as TipePembagian })} className="w-full px-3 py-2 border rounded-xl text-sm"><option value="sendiri">Bayar Sendiri</option><option value="dibagi_rata">Bagi Rata Kelompok</option><option value="dibebankan">Ditraktir Orang Lain</option></select></div>
-                  {formItem.tipe_pembagian === 'dibebankan' && (<div className="p-3 bg-amber-50 rounded-xl border border-amber-200"><label className="text-xs font-bold text-amber-800 block mb-1">Sponsornya Siapa?</label><select value={formItem.penanggung_id} required onChange={(e) => setFormItem({ ...formItem, penanggung_id: e.target.value })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm"><option value="">-- Pilih --</option>{anggota.map(a => <option key={a.id} value={a.id}>{a.nama}</option>)}</select></div>)}
-                  <button type="submit" className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-sm">{editingId ? 'Simpan Perubahan' : 'Masukkan ke Keranjang'}</button>
+                  {formItem.tipe_pembagian === 'dibebankan' && (<div className="p-3 bg-amber-50 rounded-xl border border-amber-200"><label className="text-xs font-bold text-amber-800 block mb-1">Sponsornya Siapa?</label><select value={formItem.penanggung_id || ''} required onChange={(e) => setFormItem({ ...formItem, penanggung_id: e.target.value })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm"><option value="">-- Pilih --</option>{anggota.map(a => <option key={a.id} value={a.id}>{a.nama}</option>)}</select></div>)}
+                  <button type="submit" className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-slate-800 transition-colors">{editingId ? 'Simpan Perubahan' : 'Masukkan ke Keranjang'}</button>
                 </form>
               </div>
             )}
@@ -369,7 +406,7 @@ export default function SesiJajanPage() {
                     const user = anggota.find(a => a.id === item.user_id);
                     return (
                       <div key={item.id} className={`p-4 flex gap-4 items-center transition-colors ${item.sudah_diterima ? 'bg-slate-100/70 opacity-60' : 'hover:bg-slate-50'}`}>
-                        <button disabled={statusSesi === 'Closed'} onClick={() => toggleDiterima(item.id)} className={`flex-shrink-0 w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${item.sudah_diterima ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-emerald-400'} ${statusSesi === 'Closed' ? 'cursor-not-allowed opacity-70' : ''}`}>✓</button>
+                        <button disabled={statusSesi === 'Closed'} onClick={() => toggleDiterima(item)} className={`flex-shrink-0 w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${item.sudah_diterima ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-emerald-400'} ${statusSesi === 'Closed' ? 'cursor-not-allowed opacity-70' : ''}`}>✓</button>
                         <div className="flex-1">
                           <div className={`font-bold ${item.sudah_diterima ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{item.nama_menu} <span className="text-xs text-amber-600 bg-amber-50 px-1 rounded ml-1">x{item.qty}</span></div>
                           <div className="text-xs text-slate-500 mt-1"><span className="font-semibold text-slate-700">{user?.nama}</span>{item.catatan && <span className="italic ml-2">"{item.catatan}"</span>}</div>
@@ -382,7 +419,10 @@ export default function SesiJajanPage() {
                             </div>
                           )}
                           {(item.user_id === currentUser?.id || pahlawanIds.includes(currentUser?.id)) && statusSesi === 'Open' && (
-                             <button onClick={() => handleEditClick(item)} className="text-[11px] underline text-amber-600 font-medium mt-1">Edit</button>
+                              <div className="flex gap-2 mt-1">
+                                <button onClick={() => handleEditClick(item)} className="text-[11px] underline text-amber-600 font-medium">Edit</button>
+                                <button onClick={() => handleDeleteItem(item.id)} className="text-[11px] underline text-rose-500 font-medium">Hapus</button>
+                              </div>
                           )}
                         </div>
                       </div>

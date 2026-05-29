@@ -1,23 +1,31 @@
 'use client';
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '@/utils/supabase';
+import { supabase } from '@/utils/supabase'; // ✅ Pakai util Supabase
+import CustomModal from '@/components/CustomModal'; // ✅ Import Custom Modal
 
 interface Anggota { id: string; nama: string; }
 interface RincianBiaya { id: string; item: string; harga: number; }
 type ModeSplit = 'bagi_rata' | 'manual';
 
-// Pisahkan konten ke dalam komponen terpisah agar bisa dibungkus Suspense
+// Interface Partisipan agar tidak pakai 'any'
+interface PartisipanState {
+  id: string;
+  nama: string;
+  ikut: boolean;
+  isGratis: boolean;
+  nominalManual: number;
+}
+
 function NginapKuyContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewId = searchParams?.get('viewId');
-  const isViewMode = !!viewId; // Flag penentu Read-Only
+  const isViewMode = !!viewId;
 
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; nama?: string } | null>(null);
   const [anggota, setAnggota] = useState<Anggota[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form State
   const [namaProyek, setNamaProyek] = useState('');
@@ -32,8 +40,19 @@ function NginapKuyContent() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
-  const [partisipan, setPartisipan] = useState<any[]>([]);
+  const [partisipan, setPartisipan] = useState<PartisipanState[]>([]);
   const [modeSplit, setModeSplit] = useState<ModeSplit>('bagi_rata');
+
+  // ✅ STATE UNTUK CUSTOM MODAL
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: 'success' as 'success' | 'error' | 'warning' | 'loading',
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    onCancel: undefined as (() => void) | undefined
+  });
+  const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
     fetchUsers();
@@ -50,15 +69,13 @@ function NginapKuyContent() {
     if (!user) { router.push('/login'); return; }
     setCurrentUser(user);
 
-    // Tarik daftar semua pengguna riil dari database
     const { data: profiles } = await supabase.from('profiles').select('id, nama');
     if (profiles) {
       setAnggota(profiles);
       setPartisipan(profiles.map(a => ({ id: a.id, nama: a.nama, ikut: true, isGratis: false, nominalManual: 0 })));
-      setPahlawanId(user.id); // Default pahlawan adalah diri sendiri
+      setPahlawanId(user.id);
     }
     
-    // JIKA MODE READ-ONLY (DARI BERANDA)
     if (viewId) {
        const { data: eventData } = await supabase.from('events').select('*').eq('id', viewId).single();
        if (eventData) {
@@ -68,7 +85,6 @@ function NginapKuyContent() {
            if (eventData.data_ekstra) {
                setRincianBiaya(eventData.data_ekstra.rincian || []);
            }
-           // Atur partisipan yang ikut saja
            const partisipanDB = eventData.partisipan_ids || [];
            setPartisipan(profiles ? profiles.map(a => ({ 
                id: a.id, nama: a.nama, ikut: partisipanDB.includes(a.id), isGratis: false, nominalManual: 0 
@@ -117,65 +133,82 @@ function NginapKuyContent() {
   const totalSimulasi = partisipanIkut.reduce((sum, p) => sum + (hasilSimulasi[p.id] || 0), 0);
   const selisihManual = totalBiaya - totalSimulasi;
 
-  const handleBuatTagihan = async () => {
-    if (rincianBiaya.length === 0) return alert('Masukkan minimal 1 rincian biaya pengeluaran!');
-    if (modeSplit === 'manual' && selisihManual !== 0) return alert('Total pembagian manual tidak sama dengan Total Biaya Proyek!');
-    setIsSubmitting(true);
+  // ✅ LOGIKA BUAT TAGIHAN MENGGUNAKAN CUSTOM MODAL (SUDAH AMAN DARI TYPESCRIPT)
+  const handleBuatTagihan = () => {
+    if (rincianBiaya.length === 0) {
+      return setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Oops!', message: 'Masukkan minimal 1 rincian biaya pengeluaran!', onConfirm: closeModal, onCancel: undefined }));
+    }
+    if (modeSplit === 'manual' && selisihManual !== 0) {
+      return setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Selisih Ditemukan!', message: 'Total pembagian manual tidak sama dengan Total Biaya Proyek!', onConfirm: closeModal, onCancel: undefined }));
+    }
     
-    const idSesi = 'proyek-' + Date.now();
-
-    // 1. Suntik ke Tabel events
-    const { error: eventError } = await supabase.from('events').insert({
-      id: idSesi,
-      tipe_acara: 'NGINAP',
-      nama_acara: namaProyek,
-      tanggal: tanggal,
-      status: 'Closed',
-      total_biaya: totalBiaya,
-      pahlawan_ids: [pahlawanId],
-      partisipan_ids: partisipanIkut.map(p => p.id),
-      data_ekstra: { rincian: rincianBiaya }
-    });
-
-    if (eventError) {
-      alert('Gagal buat acara: ' + eventError.message);
-      setIsSubmitting(false);
-      return;
-    }
-
-    // 2. Suntik Tagihan Per Kepala ke Tabel tagihan
-    const newTransfers: any[] = [];
-    partisipanIkut.forEach(p => {
-      const hutang = hasilSimulasi[p.id];
-      if (hutang > 0 && p.id !== pahlawanId) {
-        newTransfers.push({
-          id: `tf_${p.id}_to_${pahlawanId}_${idSesi}`,
-          event_id: idSesi,
-          dari_user_id: p.id,
-          ke_user_id: pahlawanId,
-          nominal: hutang,
-          status: 'Belum Bayar'
+    setModal(prev => ({
+      ...prev,
+      isOpen: true,
+      type: 'warning',
+      title: 'Sebar Tagihan?',
+      message: 'Anda yakin ingin menutup proyek ini dan menyebar tagihan ke teman-teman?',
+      onCancel: closeModal,
+      onConfirm: async () => {
+        setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Memproses...', message: 'Merekam ke database...', onCancel: undefined }));
+        
+        const idSesi = 'proyek-' + Date.now();
+        const { error: eventError } = await supabase.from('events').insert({
+          id: idSesi,
+          tipe_acara: 'NGINAP',
+          nama_acara: namaProyek,
+          tanggal: tanggal,
+          status: 'Closed',
+          total_biaya: totalBiaya,
+          pahlawan_ids: [pahlawanId],
+          partisipan_ids: partisipanIkut.map(p => p.id),
+          data_ekstra: { rincian: rincianBiaya }
         });
-      }
-    });
 
-    if (newTransfers.length > 0) {
-      const { error: tfError } = await supabase.from('tagihan').insert(newTransfers);
-      if (tfError) {
-        alert('Gagal sebar tagihan: ' + tfError.message);
-        setIsSubmitting(false);
-        return;
-      }
-    }
+        if (eventError) {
+          return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: eventError.message, onConfirm: closeModal, onCancel: undefined }));
+        }
 
-    alert('Tagihan berhasil disebar ke Database!');
-    router.push('/dashboard/riwayat');
+        const newTransfers: any[] = [];
+        partisipanIkut.forEach(p => {
+          const hutang = hasilSimulasi[p.id];
+          if (hutang > 0 && p.id !== pahlawanId) {
+            newTransfers.push({
+              id: `tf_${p.id}_to_${pahlawanId}_${idSesi}`,
+              event_id: idSesi,
+              dari_user_id: p.id,
+              ke_user_id: pahlawanId,
+              nominal: hutang,
+              status: 'Belum Bayar'
+            });
+          }
+        });
+
+        if (newTransfers.length > 0) {
+          const { error: tfError } = await supabase.from('tagihan').insert(newTransfers);
+          if (tfError) {
+            return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: tfError.message, onConfirm: closeModal, onCancel: undefined }));
+          }
+        }
+
+        setModal(p => ({ 
+          ...p, isOpen: true, type: 'success', title: 'Berhasil!', message: 'Tagihan resmi disebar ke teman-teman.', 
+          onCancel: undefined,
+          onConfirm: () => {
+            closeModal();
+            router.push('/dashboard/riwayat');
+          } 
+        }));
+      }
+    }));
   };
 
   if (isLoading) return <div className="p-12 text-center text-slate-500 font-bold animate-pulse">Menyiapkan data teman...</div>;
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto min-h-screen text-slate-900 pb-20">
+      <CustomModal {...modal} /> {/* ✅ RENDER MODAL DI SINI */}
+
       <header className="mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4">
         <div>
           <h2 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
@@ -213,7 +246,6 @@ function NginapKuyContent() {
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
           <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><span>📋</span> Rincian Pengeluaran</h3>
           
-          {/* SEMBUNYIKAN FORM TAMBAH JIKA VIEW MODE */}
           {!isViewMode && (
             <form onSubmit={handleTambahRincian} className="flex flex-col sm:flex-row gap-3 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100 mt-4">
               <input type="text" placeholder="Nama Item (Cth: Sewa Villa)" required value={inputItem} onChange={(e)=>setInputItem(e.target.value)} className="flex-1 px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
@@ -221,7 +253,7 @@ function NginapKuyContent() {
                 <span className="absolute left-3 top-2 text-sm text-slate-400 font-bold">Rp</span>
                 <input type="text" placeholder="0" required value={inputHarga === '' ? '' : Number(inputHarga).toLocaleString('id-ID')} onChange={(e) => setInputHarga(e.target.value.replace(/\D/g, ''))} className="w-full pl-9 pr-3 py-2 text-sm font-bold border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
               </div>
-              <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors">+ Tambah</button>
+              <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors touch-manipulation">+ Tambah</button>
             </form>
           )}
 
@@ -245,7 +277,7 @@ function NginapKuyContent() {
                       <td className="px-4 py-3 font-medium text-slate-800">{r.item}</td>
                       <td className="px-4 py-3 text-right font-bold text-slate-700">{r.harga.toLocaleString('id-ID')}</td>
                       {!isViewMode && (
-                          <td className="px-4 py-3 text-center"><button onClick={() => setRincianBiaya(rincianBiaya.filter(item => item.id !== r.id))} className="text-rose-500 font-bold">✕</button></td>
+                          <td className="px-4 py-3 text-center"><button onClick={() => setRincianBiaya(rincianBiaya.filter(item => item.id !== r.id))} className="text-rose-500 font-bold touch-manipulation">✕</button></td>
                       )}
                     </tr>
                   ))
@@ -269,15 +301,14 @@ function NginapKuyContent() {
               <h3 className="font-bold text-lg flex items-center gap-2"><span>🔪</span> Skema Split Bill</h3>
             </div>
             <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button type="button" disabled={isViewMode} onClick={() => setModeSplit('bagi_rata')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${modeSplit === 'bagi_rata' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'} ${isViewMode && 'opacity-70 cursor-not-allowed'}`}>Bagi Rata</button>
-              <button type="button" disabled={isViewMode} onClick={() => setModeSplit('manual')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${modeSplit === 'manual' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'} ${isViewMode && 'opacity-70 cursor-not-allowed'}`}>Input Manual</button>
+              <button type="button" disabled={isViewMode} onClick={() => setModeSplit('bagi_rata')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${modeSplit === 'bagi_rata' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'} ${isViewMode && 'opacity-70 cursor-not-allowed'} touch-manipulation`}>Bagi Rata</button>
+              <button type="button" disabled={isViewMode} onClick={() => setModeSplit('manual')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${modeSplit === 'manual' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'} ${isViewMode && 'opacity-70 cursor-not-allowed'} touch-manipulation`}>Input Manual</button>
             </div>
           </div>
 
-          {/* DROPDOWN SELECT PARTISIPAN */}
           <div className="mb-6 relative" ref={dropdownRef}>
             <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Pilih PIC (Siapa Saja Yang Ikut)</label>
-            <button type="button" disabled={isViewMode} onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="w-full flex justify-between items-center px-4 py-3 bg-white disabled:bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-amber-500">
+            <button type="button" disabled={isViewMode} onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="w-full flex justify-between items-center px-4 py-3 bg-white disabled:bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-amber-500 touch-manipulation">
               <span>👤 {partisipanIkut.length} Partisipan Terpilih</span>
               <span className="text-[10px]">▼</span>
             </button>
@@ -293,7 +324,6 @@ function NginapKuyContent() {
             )}
           </div>
 
-          {/* DAFTAR PARTISIPAN */}
           <div className="space-y-3">
             {partisipanIkut.length === 0 ? (
               <div className="text-center py-6 text-slate-400 text-sm italic bg-slate-50 rounded-xl border border-dashed">Silakan pilih partisipan.</div>
@@ -327,10 +357,9 @@ function NginapKuyContent() {
           </div>
         </div>
 
-        {/* SEMBUNYIKAN TOMBOL SUBMIT JIKA VIEW MODE */}
         {!isViewMode && (
-            <button onClick={handleBuatTagihan} disabled={!namaProyek || totalBiaya === 0 || isSubmitting || (modeSplit === 'manual' && selisihManual !== 0) || partisipanIkut.length === 0} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-lg shadow-lg disabled:opacity-50">
-            {isSubmitting ? 'Merekam Tagihan ke Database...' : '🚀 Buat & Sebar Tagihan Sekarang'}
+            <button onClick={handleBuatTagihan} disabled={!namaProyek || totalBiaya === 0 || partisipanIkut.length === 0} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-lg shadow-lg disabled:opacity-50 transition-colors touch-manipulation">
+               🚀 Buat & Sebar Tagihan Sekarang
             </button>
         )}
       </div>
@@ -338,7 +367,6 @@ function NginapKuyContent() {
   );
 }
 
-// Komponen Pembungkus Default (Standar Next.js 13+ untuk useSearchParams)
 export default function NginapKuyPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-slate-500 font-bold animate-pulse">Menyiapkan halaman...</div>}>

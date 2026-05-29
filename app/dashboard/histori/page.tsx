@@ -21,7 +21,8 @@ export default function HistoriAcaraPage() {
       .from('events')
       .select('*')
       .contains('partisipan_ids', [user.id])
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(20);
 
     if (eventsData) setHistory(eventsData);
     setIsLoading(false);

@@ -2,64 +2,52 @@
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/utils/supabase';
+import { supabase } from '@/utils/supabase'; // ✅ Memakai file utils/supabase
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // State untuk Profil & Upload
   const [profile, setProfile] = useState<{ id: string, nama: string, avatar_url: string | null } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // ✅ STATE BARU UNTUK MENU HP
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // ==========================================
-  // FITUR UTAMA: ENGINE REAL-TIME SUPABASE (SINKRONISASI FOTO)
-  // ==========================================
   useEffect(() => {
     let profileSubscription: any = null;
 
     const setupRealTimeProfile = async () => {
-      // 1. Dapatkan User Asli (Siapa saya?)
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 2. Ambil Data Profil Pertama Kali (Tampilan Awal)
       const { data: initialData } = await supabase.from('profiles').select('id, nama, avatar_url').eq('id', user.id).single();
       if (initialData) setProfile(initialData);
 
-      // 3. MULAI BERLANGGANAN DATA REAL-TIME (SINKRONISASI TANPA RELOAD)
-      // Kode ini "mendengarkan" tabel 'profiles' khusus untuk ID saya.
       profileSubscription = supabase
-        .channel(`realtime-profile-${user.id}`) // Saluran unik untuk user ini
+        .channel(`realtime-profile-${user.id}`)
         .on(
           'postgres_changes',
-          {
-            event: 'UPDATE', // Hanya dengarkan saat datanya Di-Update
-            schema: 'public',
-            table: 'profiles',
-            filter: `id=eq.${user.id}` // Spesifik dengerin data SAYA saja
-          },
+          { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
           (payload) => {
-            // BEGITU DATA BERUBAH DI SUPABASE (DI Halaman Manapun), JALANKAN INI!
             const newData = payload.new as any;
-            // Update state UI Sidebar seketika, Tanpa Nge-refresh Halaman!
-            setProfile({
-              id: newData.id,
-              nama: newData.nama,
-              avatar_url: newData.avatar_url
-            });
+            setProfile({ id: newData.id, nama: newData.nama, avatar_url: newData.avatar_url });
           }
-        )
-        .subscribe();
+        ).subscribe();
     };
 
     setupRealTimeProfile();
 
-    // Cleanup Function: Matikan langganan kalau user logout/pindah halaman
     return () => {
       if (profileSubscription) supabase.removeChannel(profileSubscription);
     };
-  }, []); // Hanya jalankan 1x saat aplikasi pertama kali dimuat
+  }, []);
+
+  // ✅ Tutup menu HP otomatis setiap kali pindah halaman
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -68,7 +56,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const isActive = (path: string) => pathname === path;
 
-  // Engine Upload Foto Real-Time dari Sidebar (Sekarang Tanpa Reload)
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !profile) return;
@@ -77,7 +64,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const fileExt = file.name.split('.').pop();
     const fileName = `avatar-${profile.id}-${Date.now()}.${fileExt}`;
 
-    // Upload ke Supabase Storage (Bucket: avatars)
     const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file);
 
     if (uploadError) {
@@ -86,65 +72,80 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return;
     }
 
-    // Ambil URL Publiknya
     const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
-
-    // UPDATE DATABASE (Ini akan memicu Real-Time di atas!)
     await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', profile.id);
-
-    // KITA TIDAK PERLU SET_PROFILE DI SINI LAGI! 
-    // Karena sistem Real-Time di atas akan melakukannya untuk kita.
     setIsUploading(false);
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden relative">
 
-      {/* Sidebar Kiri */}
-      <div className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between flex-shrink-0 z-20">
+      {/* ✅ MOBILE HEADER (HANYA MUNCUL DI HP) */}
+      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-30 flex justify-between items-center px-4 shadow-sm">
+        <h1 className="text-lg font-black text-slate-950 tracking-tight">💰 KitaKitaSemua</h1>
+        <button 
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="p-2 bg-slate-100 text-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+        >
+          {/* Ikon Hamburger */}
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
+      </div>
+
+      {/* ✅ BACKDROP GELAP UNTUK HP (Muncul saat menu terbuka) */}
+      {isMobileMenuOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-slate-900/50 z-40 backdrop-blur-sm transition-opacity"
+          onClick={() => setIsMobileMenuOpen(false)}
+        ></div>
+      )}
+
+      {/* ✅ SIDEBAR (RESPONSIVE: Slide-in di HP, Statis di Laptop) */}
+      <div className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col justify-between flex-shrink-0
+        transform transition-transform duration-300 ease-in-out
+        md:relative md:translate-x-0
+        ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
+      `}>
+        
         <div>
-          <div className="h-16 flex items-center px-6 border-b border-slate-100">
-            <h1 className="text-xl font-black text-slate-950 tracking-tight">💰 KitaKitaSemua</h1>
+          <div className="h-16 flex items-center justify-between px-6 border-b border-slate-100">
+            <h1 className="text-xl font-black text-slate-950 tracking-tight">KitaKitaSemua</h1>
+            {/* Tombol Close (X) hanya untuk HP */}
+            <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-rose-500">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-          <nav className="p-4 space-y-1.5 overflow-y-auto max-h-[calc(100vh-200px)]">
-
+          
+          <nav className="p-4 space-y-1.5 overflow-y-auto max-h-[calc(100vh-200px)] custom-scrollbar">
             <Link href="/dashboard" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               🏠 Beranda
             </Link>
-
             <Link href="/dashboard/jajan" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/jajan') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               🍔 Jajan Kuy
             </Link>
-
             <Link href="/dashboard/nginap" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/nginap') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               🏨 Nginap Kuy
             </Link>
-
             <Link href="/dashboard/lapak" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/lapak') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               📊 Project Kita Kuy
             </Link>
-
             <Link href="/dashboard/riwayat" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/riwayat') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               📜 Riwayat Tagihan
             </Link>
-
             <Link href="/dashboard/histori" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/histori') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               📂 Histori Acara
             </Link>
-
             <Link href="/dashboard/profile" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/profile') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               👤 Profil Saya
             </Link>
-
           </nav>
         </div>
 
         {/* BOTTOM SECTION */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50/50 space-y-3">
-
+        <div className="p-4 border-t border-slate-100 bg-slate-50/50 space-y-3 pb-safe">
           {profile && (
             <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-sm transition-all">
-              {/* Avatar yang bisa diklik */}
               <div
                 className="relative w-11 h-11 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center font-black text-blue-700 cursor-pointer overflow-hidden group flex-shrink-0 shadow-sm transition-all hover:border-blue-400"
                 onClick={() => fileInputRef.current?.click()}
@@ -153,13 +154,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {isUploading ? (
                   <span className="text-[10px] animate-pulse">⏳</span>
                 ) : profile.avatar_url ? (
-                  // FOTO INI SEKARANG AKAN TERUPDATE OTOMATIS BERKAT REAL-TIME!
                   <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
-                  // Render huruf awal nama jika foto kosong (dengan safe navigation ?)
                   (profile.nama || 'U').charAt(0).toUpperCase()
                 )}
-
                 <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                   <span className="text-white text-xs">📷</span>
                 </div>
@@ -171,19 +169,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block animate-pulse"></span> Online
                 </p>
               </div>
-
               <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleAvatarUpload} />
             </div>
           )}
 
-          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-3 text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl font-bold text-sm transition-all">
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-3 text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl font-bold text-sm transition-all touch-manipulation">
             🚪 Keluar Aplikasi
           </button>
         </div>
       </div>
 
-      {/* Konten Utama */}
-      <main className="flex-1 overflow-y-auto relative z-10">
+      {/* ✅ KONTEN UTAMA (Dengan padding atas ekstra di HP agar tidak tertutup header) */}
+      <main className="flex-1 h-full overflow-y-auto relative z-10 pt-16 md:pt-0 bg-slate-50 w-full">
         {children}
       </main>
     </div>
