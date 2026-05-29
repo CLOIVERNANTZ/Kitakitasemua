@@ -7,7 +7,7 @@ export default function JajanKuyEntryPage() {
   const buatSesiBaru = () => {
     // Generate ID unik dan lempar ke halaman kalkulator jajan
     const idBaru = 'sesi-' + Date.now();
-    router.push(`/dashboard/jajan/${idBaru}`);
+    router.push(`/jajan/${idBaru}`);
   };
 
   return (
@@ -25,9 +25,9 @@ export default function JajanKuyEntryPage() {
       <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm w-full text-center space-y-6">
         <div className="space-y-4 text-sm text-slate-600 text-left bg-slate-50 p-6 rounded-2xl border border-slate-100">
           <h4 className="font-bold text-slate-900 mb-3 flex items-center gap-2"><span>💡</span> Cara Kerja Sesi Jajan:</h4>
-          <p>1. <b>Buka Sesi:</b> Anda membuat ruang virtual dan menentukan nama warung/resto.</p>
+          <p>1. <b>Buka Sesi:</b> Tentuin nama tempat nya aja!.</p>
           <p>2. <b>Input Pesanan:</b> Teman-teman akan memilih menu masing-masing dan skema bayarnya (Sendiri / Dibagi Rata / Ditraktir).</p>
-          <p>3. <b>Otomatis Hitung:</b> Sistem akan membagikan nominal tagihan (termasuk PPN) kepada siapa saja yang berhutang ke Pahlawan/Kasir.</p>
+          <p>3. <b>Otomatis Hitung:</b> Sistem akan membagikan nominal tagihan (termasuk PPN) kepada siapa saja yang berhutang ke Pahlawan kita.</p>
         </div>
 
         <button 

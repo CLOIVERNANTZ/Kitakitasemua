@@ -1,11 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
+import { supabase } from '@/utils/supabase';
 
 // --- INTERFACE DATA ---
 interface SesiJajan { id: string; nama: string; tanggal: string; warung: string; total: number; }

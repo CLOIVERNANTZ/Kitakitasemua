@@ -2,11 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { supabase } from '@/utils/supabase';
 
 // --- INTERFACE DATA ---
 interface Anggota {
@@ -53,10 +49,6 @@ export default function SesiJajanPage() {
   });
 
   useEffect(() => {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error("Supabase URL atau Key belum terdeteksi di file .env.local!");
-    }
-
     const fetchInitialData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
