@@ -54,6 +54,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -97,19 +98,38 @@ export default function LoginPage() {
       }
 
     } else if (mode === 'register') {
-      // Logika Register (Sama seperti kemarin)
+      // 1. Daftarkan Akun di Auth
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: email,
         password: password,
       });
 
+      // Tangkap error kosong `{}` agar menjadi teks yang bisa dibaca
       if (signUpError) {
-        setError(signUpError.message);
+        setError(JSON.stringify(signUpError) === '{}' ? 'Gagal mendaftar. Pastikan Confirm Email di Supabase sudah dimatikan.' : signUpError.message);
         setLoading(false);
         return;
       }
 
       if (authData?.user) {
+        let finalAvatarUrl = '';
+
+        // 2. PROSES UPLOAD FOTO (Jika user memilih foto)
+        if (avatarFile) {
+          const fileExt = avatarFile.name.split('.').pop();
+          const fileName = `${authData.user.id}-${Date.now()}.${fileExt}`;
+          
+          const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(fileName, avatarFile);
+
+          if (!uploadError) {
+            const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+            finalAvatarUrl = publicUrlData.publicUrl;
+          }
+        }
+
+        // 3. Simpan Profil ke Database beserta URL Fotonya
         const { error: profileError } = await supabase
           .from('profiles')
           .insert({
@@ -117,14 +137,16 @@ export default function LoginPage() {
             nama: username,
             email: email,
             no_hp: formattedPhone,
+            avatar_url: finalAvatarUrl // 👈 SIMPAN LINK FOTO KE DATABASE
           });
 
         if (profileError) {
-          setError('Gagal membuat profil: ' + profileError.message);
+          setError('Akun berhasil dibuat, tapi gagal menyimpan profil: ' + profileError.message);
         } else {
-          setSuccessMsg('Akun berhasil dibuat! Silakan masuk menggunakan Nomor HP Anda.');
+          setSuccessMsg('Personil baru berhasil didaftarkan! Silakan masuk menggunakan Nomor HP Anda.');
           setMode('login');
           setPassword('');
+          setAvatarFile(null); // Reset foto
         }
       }
       setLoading(false);
@@ -190,6 +212,7 @@ export default function LoginPage() {
               <input 
                 type="file" 
                 accept="image/*"
+                onChange={(e) => setAvatarFile(e.target.files?.[0] || null)} // 👈 TANGKAP FILE-NYA
                 className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 transition-colors cursor-pointer" 
               />
             </div>
