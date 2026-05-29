@@ -8,6 +8,7 @@ export default function DashboardPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [totalHutangBerjalan, setTotalHutangBerjalan] = useState(0);
+  const [totalPiutangBerjalan, setTotalPiutangBerjalan] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -25,8 +26,8 @@ export default function DashboardPage() {
     const { data: eventsData } = await supabase
       .from('events')
       .select('*')
-      .contains('partisipan_ids', [user.id])
-      .eq('status', 'Open') // 🌟 KUNCI JAWABANNYA: TAMBAHKAN BARIS INI DI SINI!
+      
+      .eq('status', 'Open') 
       .order('created_at', { ascending: false });
 
     if (eventsData) setHistory(eventsData);
@@ -41,6 +42,17 @@ export default function DashboardPage() {
     if (tagihanData) {
       const hutangSaya = tagihanData.reduce((sum, tf) => sum + Number(tf.nominal), 0);
       setTotalHutangBerjalan(hutangSaya);
+    }
+
+    const { data: piutangData } = await supabase
+      .from('tagihan')
+      .select('nominal')
+      .eq('ke_user_id', user.id)
+      .eq('status', 'Belum Bayar');
+
+    if (piutangData) {
+      const piutangSaya = piutangData.reduce((sum, tf) => sum + Number(tf.nominal), 0);
+      setTotalPiutangBerjalan(piutangSaya);
     }
     
     setIsLoading(false);
@@ -96,21 +108,38 @@ export default function DashboardPage() {
     <div className="p-8 max-w-4xl mx-auto text-slate-900">
       <header className="mb-8">
         <h2 className="text-3xl font-extrabold tracking-tight">Halo, {currentUser?.nama}! 👋</h2>
-        <p className="text-slate-500 mt-1">Dashboard real-time dari database KitaKitaSemua.</p>
+        <p className="text-slate-500 mt-1">Rekapan Hutang-Piutang KitaKitaSemua.</p>
       </header>
 
-      {/* WIDGET TOTAL HUTANG */}
-      <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center mb-10 relative overflow-hidden">
-        <div className="absolute top-0 w-full h-2 bg-rose-500"></div>
-        <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-3xl mb-4 border border-rose-100">💸</div>
-        <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Total Hutang Berjalan Anda</p>
-        <h4 className="text-4xl font-black text-slate-900 mt-2">Rp {totalHutangBerjalan.toLocaleString('id-ID')}</h4>
-        {totalHutangBerjalan > 0 && (
-          <button onClick={() => router.push('/dashboard/riwayat')} className="mt-6 bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold px-6 py-2.5 rounded-full text-sm border border-rose-200 transition-colors">
-            Lihat Rincian & Bayar
-          </button>
-        )}
+      {/* WIDGET KEUANGAN: HUTANG & PIUTANG */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        
+        {/* KARTU 1: HUTANG SAYA (MERAH) */}
+        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
+          <div className="absolute top-0 w-full h-2 bg-rose-500"></div>
+          <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-rose-100">💸</div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hutang Mu! Bayar... (Kata Mei)</p>
+          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {totalHutangBerjalan.toLocaleString('id-ID')}</h4>
+        </div>
+
+        {/* KARTU 2: PIUTANG SAYA (HIJAU) */}
+        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
+          <div className="absolute top-0 w-full h-2 bg-emerald-500"></div>
+          <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-emerald-100">🤑</div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Uang yang tertunda (Harus sabar!!!)</p>
+          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {totalPiutangBerjalan.toLocaleString('id-ID')}</h4>
+        </div>
+
       </div>
+
+      {/* TOMBOL LIHAT RINCIAN */}
+      {(totalHutangBerjalan > 0 || totalPiutangBerjalan > 0) && (
+        <div className="text-center mb-10">
+          <button onClick={() => router.push('/dashboard/riwayat')} className="bg-slate-900 text-white hover:bg-slate-800 font-bold px-8 py-3.5 rounded-2xl text-sm shadow-md transition-colors flex items-center justify-center gap-2 w-full md:w-auto mx-auto">
+            Lihat HUTANG PIUTANG para (BONGAK) ➔
+          </button>
+        </div>
+      )}
 
       <div>
         <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><span>🎯</span> Project & Sesi Saya</h3>
