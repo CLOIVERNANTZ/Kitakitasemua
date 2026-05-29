@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase'; // ✅ Pakai util Supabase
 import CustomModal from '@/components/CustomModal'; // ✅ Import Custom Modal
 
+
+
 export default function ProfilePage() {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);

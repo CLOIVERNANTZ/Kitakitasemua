@@ -2,8 +2,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
-
-
+import DungeonPinPad from '@/components/DungeonPinPad';
 
 type AuthMode = 'login' | 'register' | 'forgot_password';
 
@@ -23,6 +22,9 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const router = useRouter();
+
+  // 🔒 STATE UNTUK DUNGEON RAHASIA (Gantikan tombol Dev Bypass bawaan)
+  const [showDungeon, setShowDungeon] = useState(false);
 
   const formatPhoneNumber = (num: string) => {
     return num.startsWith('0') ? '+62' + num.substring(1) : num;
@@ -44,7 +46,7 @@ export default function LoginPage() {
         .single();
 
       if (searchError || !profile) {
-        setError('Nomor HP belum terdaftar di JajanBareng.');
+        setError('Nomor HP belum terdaftar woiii....');
         setLoading(false);
         return;
       }
@@ -109,34 +111,26 @@ export default function LoginPage() {
     }
   };
 
-  // ==========================================
-  // FUNGSI PINTU BELAKANG (DEV BYPASS)
-  // ==========================================
-  const handleDevBypass = () => {
-    const answer = window.prompt('Ise Goarmu?');
-    if (answer === '123456') {
-      router.push('/dashboard');
-    } else if (answer !== null) {
-      alert('Sandi salah, akses ditolak!');
-    }
-  };
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 relative">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 relative py-12">
       
-      {/* TOMBOL RAHASIA (Dipojok kanan atas, disamarkan sedikit) */}
+      {/* 👑 RENDER DUNGEON PIN PAD (Merespon jika tombol bypass diklik) */}
+      {showDungeon && <DungeonPinPad onClose={() => setShowDungeon(false)} />}
+
+      {/* 🤫 TOMBOL DEV BYPASS (Satu kali klik langsung membuka pintu dungeon) */}
       <button 
-        onClick={handleDevBypass}
-        className="absolute top-4 right-4 px-3 py-1 bg-slate-200 text-slate-500 text-xs font-bold rounded-lg hover:bg-slate-300 transition-colors"
+        type="button"
+        onClick={() => setShowDungeon(true)}
+        className="absolute top-4 right-4 px-3 py-1 bg-slate-200 text-slate-500 text-xs font-bold rounded-lg hover:bg-slate-300 transition-colors z-10"
         title="Masuk Tanpa Login (Dev Mode)"
       >
-        🤫 Dev Bypass
+        🤫 Dev Bypass (hack kalau bisa!!)
       </button>
 
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-sm border border-slate-100 relative">
         
         <div className="text-center">
-          <h2 className="text-3xl font-extrabold text-slate-950 tracking-tight">🥪 JajanBareng</h2>
+          <h2 className="text-3xl font-extrabold text-slate-950 tracking-tight">🥪 KitaKitaSemua (Keuangan)</h2>
           <p className="mt-2 text-sm text-slate-500">
             {mode === 'login' && 'Masuk dengan Nomor HP & Password.'}
             {mode === 'register' && 'Isi data berikut untuk bergabung.'}
@@ -149,6 +143,20 @@ export default function LoginPage() {
 
         <form className="mt-8 space-y-4" onSubmit={handleAuth} suppressHydrationWarning>
           
+          {/* AREA UPLOAD FOTO PROFIL DENGAN PADDING (Hanya Muncul saat Register) */}
+          {mode === 'register' && (
+            <div className="p-4 sm:p-5 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 flex flex-col items-center justify-center text-center">
+              <span className="text-2xl mb-2">📸</span>
+              <label className="text-sm font-semibold text-slate-700 block mb-1">Upload Foto Profil (Opsional)</label>
+              <p className="text-xs text-slate-400 mb-3">Format JPG/PNG maksimal 2MB</p>
+              <input 
+                type="file" 
+                accept="image/*"
+                className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-700 hover:file:bg-amber-200 transition-colors cursor-pointer" 
+              />
+            </div>
+          )}
+
           {mode !== 'forgot_password' && (
             <div>
               <label className="text-sm font-medium text-slate-700 block mb-1">Nomor WhatsApp / HP</label>
