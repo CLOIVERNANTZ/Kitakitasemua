@@ -44,6 +44,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
   }, []);
 
+
+  // 🧹 SAPU OTOMATIS: Penjaga Sesi & Token Nyangkut
+  useEffect(() => {
+    const checkAndCleanSession = async () => {
+      // 1. Cek status sesi saat ini
+      const { data, error } = await supabase.auth.getSession();
+
+      // 2. Jika ada error token nyangkut atau sesi tidak valid
+      if (error || !data.session) {
+        console.warn("🧹 Token kadaluarsa terdeteksi. Membersihkan...");
+        await supabase.auth.signOut(); 
+        router.push('/login'); 
+      }
+    };
+
+    checkAndCleanSession();
+
+    // 3. Pasang "CCTV" untuk memantau perubahan status (Cukup SIGNED_OUT saja)
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        router.push('/login');
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [router, pathname]);
+
   // ✅ Tutup menu HP otomatis setiap kali pindah halaman
   useEffect(() => {
     setIsMobileMenuOpen(false);

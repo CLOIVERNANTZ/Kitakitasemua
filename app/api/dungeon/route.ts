@@ -4,25 +4,25 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
   try {
     const { pin } = await request.json();
+    const cleanPin = pin.trim();
     
-    // 🔑 PIN Rahasia (Bisa diubah sesuai selera)
-    const secretPin = process.env.ADMIN_SECRET_PIN || '437626';
+    // Memanggil rahasia dari brankas .env.local
+    const vipUsers: Record<string, { email: string, password: string }> = {
+      [process.env.VIP_PIN_1 as string]: { 
+        email: process.env.VIP_EMAIL_1 as string, 
+        password: process.env.VIP_PASS_1 as string 
+      },
+      [process.env.VIP_PIN_2 as string]: { 
+        email: process.env.VIP_EMAIL_2 as string, 
+        password: process.env.VIP_PASS_2 as string 
+      }
+    };
+
+    const user = vipUsers[cleanPin];
     
-    // 📧 UBAH dengan EMAIL akun aslimu yang sudah bisa login!
-    const myRealEmail = process.env.ADMIN_LOGIN_EMAIL || 'germansiringo1234@gmail.com';
-    
-    // 🔐 UBAH dengan PASSWORD akun aslimu!
-    const myRealPassword = process.env.ADMIN_LOGIN_PASSWORD || '437626';
-    
-    if (pin === secretPin) {
-      // ✅ PIN BENAR: Server menyerahkan email & password aslimu ke Frontend
-      return NextResponse.json({ 
-        success: true, 
-        email: myRealEmail, 
-        password: myRealPassword 
-      });
+    if (user && user.email && user.password) {
+      return NextResponse.json({ success: true, email: user.email, password: user.password });
     } else {
-      // ❌ PIN SALAH
       return NextResponse.json({ success: false, message: 'Invalid PIN' }, { status: 401 });
     }
   } catch (error) {

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
 import DungeonPinPad from '@/components/DungeonPinPad';
@@ -8,22 +8,55 @@ type AuthMode = 'login' | 'register' | 'forgot_password';
 
 export default function LoginPage() {
   const [mode, setMode] = useState<AuthMode>('login');
-  
-  // State Form
+  const router = useRouter();
+
+  // --- LOGIKA SLIDESHOW GERBANG KENANGAN ---
+  const [backgroundPhotos, setBackgroundPhotos] = useState<string[]>([]);
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+
+  useEffect(() => {
+    // 1. Ambil foto-foto kebersamaan dari Supabase (Secara Publik)
+    const fetchBackgrounds = async () => {
+      const { data, error } = await supabase
+        .from('family_photos')
+        .select('image_url')
+        .order('created_at', { ascending: false }) // Ambil yang terbaru dulu
+        .limit(10); // Ambil 10 foto terakhir buat slideshow
+
+      if (!error && data && data.length > 0) {
+        // Ambil hanya URL-nya saja
+        setBackgroundPhotos(data.map(p => p.image_url));
+      } else {
+        // Fallback jika tidak ada foto di database (bisa pakai warna solid atau image default)
+        setBackgroundPhotos(['https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=1920']);
+      }
+    };
+
+    fetchBackgrounds();
+  }, []);
+
+  useEffect(() => {
+    // 2. Logika Auto-Rotate (Slideshow) setiap 7 detik
+    if (backgroundPhotos.length <= 1) return; // Jangan putar kalau cuma ada 1 foto
+
+    const timer = setInterval(() => {
+      setCurrentPhotoIndex((prevIndex) => 
+        (prevIndex + 1) % backgroundPhotos.length
+      );
+    }, 7000); // Ganti foto setiap 7 detik
+
+    return () => clearInterval(timer); // Bersihkan timer saat component unmount
+  }, [backgroundPhotos]);
+  // ------------------------------------------
+
+  // State Form & Status (Sama seperti kemarin)
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [namaBank, setNamaBank] = useState('');
-  const [noRekening, setNoRekening] = useState('');
-  
-  // State Status
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const router = useRouter();
-
-  // 🔒 STATE UNTUK DUNGEON RAHASIA (Gantikan tombol Dev Bypass bawaan)
   const [showDungeon, setShowDungeon] = useState(false);
 
   const formatPhoneNumber = (num: string) => {
@@ -41,12 +74,12 @@ export default function LoginPage() {
     if (mode === 'login') {
       const { data: profile, error: searchError } = await supabase
         .from('profiles')
-        .select('email')
+        .select('email, no_hp')
         .eq('no_hp', formattedPhone)
         .single();
 
       if (searchError || !profile) {
-        setError('Nomor HP belum terdaftar woiii....');
+        setError('Nomor HP belum terdaftar di JajanBareng.');
         setLoading(false);
         return;
       }
@@ -60,10 +93,11 @@ export default function LoginPage() {
         setError('Password yang Anda masukkan salah.');
         setLoading(false);
       } else {
-        router.push('/dashboard');
+        router.push('/dashboard/riwayat'); // Arahkan ke dashboard utama
       }
 
     } else if (mode === 'register') {
+      // Logika Register (Sama seperti kemarin)
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: email,
         password: password,
@@ -83,8 +117,6 @@ export default function LoginPage() {
             nama: username,
             email: email,
             no_hp: formattedPhone,
-            nama_bank: namaBank,       
-            no_rekening: noRekening
           });
 
         if (profileError) {
@@ -96,78 +128,85 @@ export default function LoginPage() {
         }
       }
       setLoading(false);
-
-    } else if (mode === 'forgot_password') {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/dashboard`,
-      });
-
-      if (resetError) {
-        setError(resetError.message);
-      } else {
-        setSuccessMsg('Link reset password telah dikirim ke email Anda. Silakan cek kotak masuk.');
-      }
-      setLoading(false);
     }
+    // Forgot Password skip dulu buat fokus slideshow
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 relative py-12">
+    // CONTAINER UTAMA - Sekarang relatif agar background bisa absolute
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-900">
       
-      {/* 👑 RENDER DUNGEON PIN PAD (Merespon jika tombol bypass diklik) */}
+      {/* 🖼️ LAYER BACKGROUND SLIDESHOW (Auto-Generate & Auto-Rotate) */}
+      {backgroundPhotos.map((photoUrl, index) => (
+        <div
+          key={photoUrl}
+          className={`absolute inset-0 z-0 transition-opacity duration-1000 ease-in-out ${
+            index === currentPhotoIndex ? 'opacity-30' : 'opacity-0'
+          }`}
+          style={{
+            backgroundImage: `url(${photoUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            filter: 'blur(3px)', // Beri sedikit efek blur biar form tetap fokus
+          }}
+        />
+      ))}
+
+      {/* 👑 RENDER DUNGEON PIN PAD (Mantra Rahasia) */}
       {showDungeon && <DungeonPinPad onClose={() => setShowDungeon(false)} />}
 
-      {/* 🤫 TOMBOL DEV BYPASS (Satu kali klik langsung membuka pintu dungeon) */}
+      {/* 🤫 TOMBOL DEV BYPASS (Tetap ada di pojok) */}
       <button 
         type="button"
         onClick={() => setShowDungeon(true)}
-        className="absolute top-4 right-4 px-3 py-1 bg-slate-200 text-slate-500 text-xs font-bold rounded-lg hover:bg-slate-300 transition-colors z-10"
-        title="Masuk Tanpa Login (Dev Mode)"
+        className="absolute top-4 right-4 px-3 py-1 bg-white/10 text-slate-300 text-xs font-bold rounded-lg hover:bg-white/20 transition-colors z-20 backdrop-blur-sm border border-white/10"
+        title="Masuk markas tanpa ngetik (Dev Mode)"
       >
-        🤫 Dev Bypass (hack kalau bisa!!)
+        🤫 Pintu Belakang
       </button>
 
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-sm border border-slate-100 relative">
+      {/* BOX FORM LOGIN - Sekarang relatif z-10 agar di atas background */}
+      <div className="max-w-md w-full space-y-8 bg-white/90 p-8 rounded-3xl shadow-2xl border border-white/20 relative z-10 backdrop-blur-md">
         
         <div className="text-center">
-          <h2 className="text-3xl font-extrabold text-slate-950 tracking-tight">🥪 KitaKitaSemua (Keuangan)</h2>
-          <p className="mt-2 text-sm text-slate-500">
-            {mode === 'login' && 'Masuk dengan Nomor HP & Password.'}
-            {mode === 'register' && 'Isi data berikut untuk bergabung.'}
-            {mode === 'forgot_password' && 'Masukkan email untuk menerima tautan reset.'}
+          <h2 className="text-3xl font-black text-slate-950 tracking-tight">🥪 JajanBareng</h2>
+          <p className="mt-2 text-sm text-slate-600 font-medium">
+            {mode === 'login' && 'Markas Kita Kita Semua. Masuk dulu Kuy!'}
+            {mode === 'register' && 'Wajib isi data biar gak jadi buronan patungan.'}
           </p>
         </div>
         
-        {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-100 text-center font-medium">{error}</div>}
-        {successMsg && <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm border border-emerald-100 text-center font-medium">{successMsg}</div>}
+        {error && <div className="bg-rose-50 text-rose-600 p-3 rounded-xl text-sm border border-rose-100 text-center font-bold">{error}</div>}
+        {successMsg && <div className="bg-emerald-50 text-emerald-700 p-3 rounded-xl text-sm border border-emerald-100 text-center font-bold">{successMsg}</div>}
 
         <form className="mt-8 space-y-4" onSubmit={handleAuth} suppressHydrationWarning>
           
-          {/* AREA UPLOAD FOTO PROFIL DENGAN PADDING (Hanya Muncul saat Register) */}
+          {/* AREA UPLOAD FOTO PROFIL (Hanya Muncul saat Register - Padding Besar) */}
           {mode === 'register' && (
-            <div className="p-4 sm:p-5 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 flex flex-col items-center justify-center text-center">
-              <span className="text-2xl mb-2">📸</span>
-              <label className="text-sm font-semibold text-slate-700 block mb-1">Upload Foto Profil (Opsional)</label>
-              <p className="text-xs text-slate-400 mb-3">Format JPG/PNG maksimal 2MB</p>
+            <div className="p-5 sm:p-6 border-2 border-dashed border-amber-200 rounded-2xl bg-amber-50 text-center mb-6 shadow-inner">
+              <span className="text-3xl mb-2 block">📷</span>
+              <label className="text-xs font-black text-amber-900 block mb-1">Pasang Komuk Terganteng/Tercantik</label>
+              <p className="text-[10px] text-amber-700 mb-3">Format JPG/PNG, maksimal 2MB ya bwang.</p>
               <input 
                 type="file" 
                 accept="image/*"
-                className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-700 hover:file:bg-amber-200 transition-colors cursor-pointer" 
+                className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 transition-colors cursor-pointer" 
               />
             </div>
           )}
 
+          {/* Form Inputs (No HP, Username, Email, Password) - Sama seperti kemarin */}
           {mode !== 'forgot_password' && (
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Nomor WhatsApp / HP</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Nomor WhatsApp / HP</label>
               <div className="flex">
-                <span className="inline-flex items-center px-4 rounded-l-xl border border-r-0 border-slate-200 bg-slate-50 text-slate-500 text-sm font-bold">
+                <span className="inline-flex items-center px-4 rounded-l-xl border border-r-0 border-slate-200 bg-slate-100 text-slate-500 text-sm font-black">
                   +62
                 </span>
                 <input
                   type="tel"
                   required
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
                   placeholder="81234567890"
                   value={phone.replace('+62', '')}
                   onChange={(e) => setPhone(e.target.value)}
@@ -178,25 +217,25 @@ export default function LoginPage() {
 
           {mode === 'register' && (
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Nama User / Panggilan</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Nama Panggilan di Tongkrongan</label>
               <input
                 type="text"
                 required
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900"
-                placeholder="Contoh: budijajan"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
+                placeholder="Contoh: Budi Buronan"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
             </div>
           )}
 
-          {mode !== 'login' && (
+          {mode === 'register' && (
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Alamat Email</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Alamat Email Resmi</label>
               <input
                 type="email"
                 required
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
                 placeholder="kamu@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -207,23 +246,14 @@ export default function LoginPage() {
           {mode !== 'forgot_password' && (
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="text-sm font-medium text-slate-700">Password</label>
-                {mode === 'login' && (
-                  <button 
-                    type="button" 
-                    onClick={() => { setMode('forgot_password'); setError(''); setSuccessMsg(''); }}
-                    className="text-xs text-amber-600 hover:underline font-medium"
-                  >
-                    Lupa Password?
-                  </button>
-                )}
+                <label className="text-xs font-bold text-slate-600">Password</label>
               </div>
               <input
                 type="password"
                 required
                 minLength={6}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900"
-                placeholder={mode === 'register' ? 'Minimal 6 karakter' : '••••••••'}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -233,28 +263,28 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-6 py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl shadow-sm transition-all disabled:opacity-50"
+            className="w-full mt-6 py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 text-sm"
           >
-            {loading ? 'Memproses...' : (
-              mode === 'login' ? 'Masuk ke Aplikasi' : 
-              mode === 'register' ? 'Daftar Akun Jajan' : 'Kirim Link Reset'
+            {loading ? 'Sabar, lagi manggil Supabase...' : (
+              mode === 'login' ? 'Masuk Markas 🚀' : 
+              mode === 'register' ? 'Daftar Jadi Personil 🔥' : 'Kirim Link Reset'
             )}
           </button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-slate-500 space-y-2">
+        <div className="mt-6 text-center text-xs text-slate-500 space-y-2 font-medium">
           {mode === 'login' && (
             <p>
-              Belum punya akun?{' '}
-              <button type="button" onClick={() => { setMode('register'); setError(''); setSuccessMsg(''); }} className="font-bold text-amber-600 hover:underline">
-                Daftar di sini
+              Belum terdaftar di sirkel?{' '}
+              <button type="button" onClick={() => { setMode('register'); setError(''); setSuccessMsg(''); }} className="font-black text-amber-600 hover:underline">
+                Gabung di sini bwang
               </button>
             </p>
           )}
           {mode !== 'login' && (
             <p>
-              <button type="button" onClick={() => { setMode('login'); setError(''); setSuccessMsg(''); }} className="font-bold text-slate-600 hover:underline">
-                ← Kembali ke Halaman Masuk
+              <button type="button" onClick={() => { setMode('login'); setError(''); setSuccessMsg(''); }} className="font-black text-slate-700 hover:underline">
+                ← Kembali ke Pintu Depan
               </button>
             </p>
           )}
