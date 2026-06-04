@@ -15,6 +15,7 @@ interface PartisipanState {
   ikut: boolean;
   isGratis: boolean;
   nominalManual: number;
+  isTamu?: boolean;
 }
 
 function NginapKuyContent() {
@@ -71,26 +72,53 @@ function NginapKuyContent() {
     setCurrentUser(user);
 
     const { data: profiles } = await supabase.from('profiles').select('id, nama');
+    
+    // 🌟 AMBIL DATA TAMU YANG PERNAH DI-ADD DI FITUR MANAPUN VIA TABEL MASTER TAGIHAN_TAMU
+    const { data: historiTamu } = await supabase.from('tagihan_tamu').select('nama_tamu');
+    const tamuUnik = historiTamu ? Array.from(new Set(historiTamu.map(t => t.nama_tamu))) : [];
+
     if (profiles) {
       setAnggota(profiles);
-      setPartisipan(profiles.map(a => ({ id: a.id, nama: a.nama, ikut: true, isGratis: false, nominalManual: 0 })));
+      
+      // Susun list anggota resmi
+      const listMember = profiles.map(a => ({ id: a.id, nama: a.nama, ikut: true, isGratis: false, nominalManual: 0, isTamu: false }));
+      
+      // Susun list tamu dari riwayat masa lalu (default ikut: false agar tidak langsung terpilih otomatis)
+      const listTamu = tamuUnik.map(nama => ({ id: nama, nama: `👤 ${nama} (Tamu)`, ikut: false, isGratis: false, nominalManual: 0, isTamu: true }));
+      
+      let finalPartisipan = [...listMember, ...listTamu];
+
+      if (viewId) {
+         const { data: eventData } = await supabase.from('events').select('*').eq('id', viewId).single();
+         if (eventData) {
+             setNamaProyek(eventData.nama_acara);
+             setTanggal(eventData.tanggal);
+             setPahlawanId(eventData.pahlawan_ids?.[0] || '');
+             if (eventData.data_ekstra) {
+                 setRincianBiaya(eventData.data_ekstra.rincian || []);
+             }
+             const partisipanDB = eventData.partisipan_ids || [];
+             
+             // Cek tamu yang ikut di sesi nginap khusus ID ini
+             const { data: tagihanTamuEvent } = await supabase.from('tagihan_tamu').select('nama_tamu').eq('event_id', viewId);
+             const tamuSesiIni = tagihanTamuEvent ? tagihanTamuEvent.map(t => t.nama_tamu) : [];
+
+             // Pastikan tamu sesi ini masuk list
+             tamuSesiIni.forEach(nama => {
+               if (!finalPartisipan.some(p => p.id === nama)) {
+                 finalPartisipan.push({ id: nama, nama: `👤 ${nama} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, isTamu: true });
+               }
+             });
+
+             finalPartisipan = finalPartisipan.map(p => {
+               const isIkut = p.isTamu ? tamuSesiIni.includes(p.id) : partisipanDB.includes(p.id);
+               return { ...p, ikut: isIkut };
+             });
+         }
+      }
+
+      setPartisipan(finalPartisipan);
       setPahlawanId(user.id);
-    }
-    
-    if (viewId) {
-       const { data: eventData } = await supabase.from('events').select('*').eq('id', viewId).single();
-       if (eventData) {
-           setNamaProyek(eventData.nama_acara);
-           setTanggal(eventData.tanggal);
-           setPahlawanId(eventData.pahlawan_ids?.[0] || '');
-           if (eventData.data_ekstra) {
-               setRincianBiaya(eventData.data_ekstra.rincian || []);
-           }
-           const partisipanDB = eventData.partisipan_ids || [];
-           setPartisipan(profiles ? profiles.map(a => ({ 
-               id: a.id, nama: a.nama, ikut: partisipanDB.includes(a.id), isGratis: false, nominalManual: 0 
-           })) : []);
-       }
     }
     setIsLoading(false);
   };
@@ -214,24 +242,45 @@ function NginapKuyContent() {
         }
 
         const newTransfers: any[] = [];
+        const newTamuTransfers: any[] = [];
         partisipanIkut.forEach(p => {
           const hutang = hasilSimulasi[p.id];
           if (hutang > 0 && p.id !== pahlawanId) {
-            newTransfers.push({
-              id: `tf_${p.id}_to_${pahlawanId}_${idSesi}`,
-              event_id: idSesi,
-              dari_user_id: p.id,
-              ke_user_id: pahlawanId,
-              nominal: hutang,
-              status: 'Belum Bayar'
-            });
+            if (p.isTamu) {
+              // 👻 JIKA DIA TAMU, KIRIM KE ARRAY KHUSUS TAMU
+              newTamuTransfers.push({
+                event_id: idSesi,
+                nama_tamu: p.id,
+                ke_user_id: pahlawanId,
+                nominal: hutang,
+                status: 'Belum Bayar'
+              });
+            } else {
+              // 👤 JIKA MEMBER RESMI, MASUKKAN SEPERTI BIASA
+              newTransfers.push({
+                id: `tf_${p.id}_to_${pahlawanId}_${idSesi}`,
+                event_id: idSesi,
+                dari_user_id: p.id,
+                ke_user_id: pahlawanId,
+                nominal: hutang,
+                status: 'Belum Bayar'
+              });
+            }
           }
         });
 
+        // Eksekusi insert ke tabel masing-masing
         if (newTransfers.length > 0) {
           const { error: tfError } = await supabase.from('tagihan').insert(newTransfers);
           if (tfError) {
             return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: tfError.message, onConfirm: closeModal, onCancel: undefined }));
+          }
+        }
+
+        if (newTamuTransfers.length > 0) {
+          const { error: tamuError } = await supabase.from('tagihan_tamu').insert(newTamuTransfers);
+          if (tamuError) {
+            return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal Menyimpan Tamu', message: tamuError.message, onConfirm: closeModal, onCancel: undefined }));
           }
         }
 
@@ -365,23 +414,80 @@ function NginapKuyContent() {
             </div>
           </div>
 
+          {/* 👇 INI BAGIAN YANG TADI TERHAPUS (Tombol & Wrapper) 👇 */}
           <div className="mb-6 relative" ref={dropdownRef}>
             <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Pilih PIC (Siapa Saja Yang Ikut)</label>
             <button type="button" disabled={isViewMode} onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="w-full flex justify-between items-center px-4 py-3 bg-white disabled:bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-amber-500 touch-manipulation">
               <span>👤 {partisipanIkut.length} Partisipan Terpilih</span>
               <span className="text-[10px]">▼</span>
             </button>
+
+            {/* 👇 ISI DROPDOWN 👇 */}
             {isDropdownOpen && !isViewMode && (
-              <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-60 overflow-y-auto p-2">
-                {partisipan.map(p => (
-                  <label key={p.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg cursor-pointer">
+              <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-72 overflow-y-auto p-2 space-y-1">
+                
+                {/* 👤 1. TAMPILKAN MEMBER AKTIF DI ATAS */}
+                {partisipan.filter(p => !p.isTamu).map(p => (
+                  <label key={p.id} className="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-lg cursor-pointer">
                     <input type="checkbox" checked={p.ikut} onChange={(e) => handleUbahPartisipan(p.id, 'ikut', e.target.checked)} className="w-5 h-5 text-amber-500 rounded"/>
                     <span className={`text-sm ${p.ikut ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{p.nama}</span>
                   </label>
                 ))}
+                
+                {/* ➖ GARIS PEMBATAS UNTUK TAMU MASA LALU */}
+                <div className="h-px bg-slate-200 my-2 mx-1"></div>
+                <div className="text-[10px] font-black text-blue-600 px-2.5 uppercase tracking-wider mb-1">📋 Orang Asing Di Muka Pintu</div>
+
+                {/* 👻 2. TAMPILKAN DAFTAR TAMU DI PALING BAWAH DROPDOWN */}
+                {partisipan.filter(p => p.isTamu).length === 0 ? (
+                  <div className="text-[11px] text-slate-400 italic px-2.5 py-1">Belum ada riwayat tamu.</div>
+                ) : (
+                  partisipan.filter(p => p.isTamu).map(p => (
+                    <label key={p.id} className="flex items-center gap-3 p-2.5 hover:bg-blue-50/40 rounded-lg cursor-pointer">
+                      <input type="checkbox" checked={p.ikut} onChange={(e) => handleUbahPartisipan(p.id, 'ikut', e.target.checked)} className="w-5 h-5 text-blue-500 rounded"/>
+                      <span className={`text-sm ${p.ikut ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{p.nama}</span>
+                    </label>
+                  ))
+                )}
+
+                {/* ➕ 3. INPUT FORM KHUSUS JIKA INGIN TAMBAH TAMU BARU YANG BELUM PERNAH IKUT */}
+                <div className="p-2 border-t border-slate-100 mt-2 flex gap-2 bg-slate-50 rounded-lg">
+                  <input 
+                    type="text" 
+                    placeholder="Tambah nama tamu baru..." 
+                    id="input-tamu-baru-nginap"
+                    className="flex-1 text-xs border border-slate-200 bg-white rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 font-medium"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val && !partisipan.some(p => p.id === val)) {
+                          setPartisipan(prev => [...prev, { id: val, nama: `👤 ${val} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, isTamu: true }]);
+                          (e.target as HTMLInputElement).value = '';
+                        }
+                      }
+                    }}
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const inputEl = document.getElementById('input-tamu-baru-nginap') as HTMLInputElement;
+                      const val = inputEl?.value.trim();
+                      if (val && !partisipan.some(p => p.id === val)) {
+                        setPartisipan(prev => [...prev, { id: val, nama: `👤 ${val} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, isTamu: true }]);
+                        inputEl.value = '';
+                      }
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1 rounded shadow-sm transition-colors"
+                  >
+                    + Tambah
+                  </button>
+                </div>
+
               </div>
             )}
           </div>
+          {/* 👆 WRAPPER & TOMBOL DROPDOWN SELESAI 👆 */}
 
           <div className="space-y-3">
             {partisipanIkut.length === 0 ? (

@@ -6,13 +6,15 @@ import CustomModal from '@/components/CustomModal'; // ✅ Import Custom Modal
 // --- INTERFACE DATA ---
 interface SesiJajan { id: string; nama: string; tanggal: string; warung: string; total: number; }
 interface UserProfile { id: string; nama: string; nama_bank?: string; no_rekening?: string; }
-interface StatusTransfer { id: string; id_sesi: string; dari_user_id: string; ke_user_id: string; nominal: number; status: 'Belum Bayar' | 'Menunggu Konfirmasi' | 'Lunas'; bukti_url?: string; }
+interface StatusTransfer { id: string; id_sesi: string; dari_user_id: string; ke_user_id: string; nominal: number; status: 'Belum Bayar' | 'Menunggu Konfirmasi' | 'Lunas'; bukti_url?: string; isTamu?: boolean;}
 
 export default function RiwayatJajanPage() {
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [daftarSesi, setDaftarSesi] = useState<SesiJajan[]>([]);
   const [sesiTerpilih, setSesiTerpilih] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'event' | 'person'>('event'); // 👈 Mode tampilan baru
+  const [orangTerpilih, setOrangTerpilih] = useState<string | null>(null);
   
   const [transfers, setTransfers] = useState<StatusTransfer[]>([]);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -49,25 +51,46 @@ export default function RiwayatJajanPage() {
       warung: e.tipe_acara || 'Acara', total: e.total_biaya 
     })));
 
+    // 1. Tarik data tagihan Anggota Resmi
     const { data: tagihan } = await supabase.from('tagihan').select('*');
-    if (tagihan) setTransfers(tagihan.map(t => ({
+    const memberTransfers = tagihan ? tagihan.map(t => ({
       id: t.id, id_sesi: t.event_id, dari_user_id: t.dari_user_id,
-      ke_user_id: t.ke_user_id, nominal: t.nominal, status: t.status, bukti_url: t.bukti_url
-    })));
+      ke_user_id: t.ke_user_id, nominal: t.nominal, status: t.status, bukti_url: t.bukti_url,
+      isTamu: false // 👈 Penanda bukan tamu
+    })) : [];
+
+    // 2. Tarik data tagihan khusus TAMU
+    const { data: tagihanTamu } = await supabase.from('tagihan_tamu').select('*');
+    const tamuTransfers = tagihanTamu ? tagihanTamu.map(t => ({
+      id: t.id, id_sesi: t.event_id, dari_user_id: t.nama_tamu, // 👈 Simpan nama langsung di kolom ini
+      ke_user_id: t.ke_user_id, nominal: t.nominal, status: t.status, bukti_url: null,
+      isTamu: true // 👈 Penanda bahwa ini data tamu
+    })) : [];
+
+    // 3. Gabungkan seluruh data ke dalam state utama
+    setTransfers([...memberTransfers, ...tamuTransfers]);
+    console.log("Data Event:", events);
+    console.log("Tagihan Member:", tagihan);
+    console.log("Tagihan Tamu:", tagihanTamu);
   };
 
-  // ✅ UPDATE STATUS DENGAN KONFIRMASI MODAL
   const handleUpdateStatus = (idTransfer: string, statusBaru: StatusTransfer['status']) => {
+    // Cari tahu apakah item target merupakan tagihan tamu atau bukan
+    const targetTf = transfers.find(tf => tf.id === idTransfer);
+    const tabelTarget = targetTf?.isTamu ? 'tagihan_tamu' : 'tagihan';
+
     setModal(prev => ({
       ...prev,
       isOpen: true,
       type: statusBaru === 'Lunas' ? 'success' : 'warning',
       title: statusBaru === 'Lunas' ? 'Validasi Lunas?' : 'Batalkan?',
-      message: statusBaru === 'Lunas' ? 'Pastikan uang sudah benar-benar masuk ke rekening Anda.' : 'Status akan dikembalikan ke Belum Bayar.',
+      message: statusBaru === 'Lunas' ? 'Cek lagi weh, siapa tau dia boong!!.' : 'ih gk benar, buat dia Belum Bayar.',
       onCancel: closeModal,
       onConfirm: async () => {
-        setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Memproses...', message: 'Memperbarui status transaksi...', onCancel: undefined }));
-        const { error } = await supabase.from('tagihan').update({ status: statusBaru }).eq('id', idTransfer);
+        setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Savaarrrrr bwang...', message: 'udah beresss...', onCancel: undefined }));
+        
+        // 🌟 Mengupdate berdasarkan nama tabel yang sesuai
+        const { error } = await supabase.from(tabelTarget).update({ status: statusBaru }).eq('id', idTransfer);
 
         if (!error) {
           setTransfers(prevTf => prevTf.map(tf => tf.id === idTransfer ? { ...tf, status: statusBaru } : tf));
@@ -78,6 +101,27 @@ export default function RiwayatJajanPage() {
       }
     }));
   };
+
+  // ✅ LOGIKA NETTING (PLUS-MINUS) PER ORANG
+  const netMap = transfers.filter(tf => tf.status === 'Belum Bayar').reduce((acc, tf) => {
+    if (tf.ke_user_id === currentUser?.id) {
+      acc[tf.dari_user_id] = (acc[tf.dari_user_id] || 0) + tf.nominal;
+    } else if (tf.dari_user_id === currentUser?.id) {
+      acc[tf.ke_user_id] = (acc[tf.ke_user_id] || 0) - tf.nominal;
+    }
+    return acc;
+  }, {} as Record<string, number>);
+
+  // ✅ MENGAMBIL SEMUA ORANG DARI NETMAP (ANGGOTA + TAMU)
+  const listOrangTerkait = Object.keys(netMap)
+    .filter(idOrName => idOrName !== currentUser?.id && Math.abs(netMap[idOrName]) > 1)
+    .map(idOrName => {
+      const profilAsli = profiles.find(p => p.id === idOrName);
+      if (profilAsli) return profilAsli;
+      
+      // Jika tidak ada di profiles, berarti dia Tamu
+      return { id: idOrName, nama: `👤 ${idOrName} (Tamu)` }; 
+    });
 
   const handleUploadBukti = async (e: React.ChangeEvent<HTMLInputElement>, idTransfer: string) => {
     const file = e.target.files?.[0];
@@ -102,6 +146,70 @@ export default function RiwayatJajanPage() {
     setModal(prev => ({ ...prev, isOpen: true, type: 'success', title: 'Berhasil Terkirim!', message: 'Bukti transfer sudah diunggah. Tunggu temanmu memvalidasi ya!', onConfirm: closeModal }));
   };
 
+  // ✅ FUNGSI BATCH UPDATE (BAYAR SEMUA / APPROVE SEMUA)
+  // ✅ FUNGSI BATCH UPDATE (BAYAR SEMUA / APPROVE SEMUA)
+  const handleBatchUpdate = (action: 'settle' | 'approve') => {
+    if (!orangTerpilih) return;
+    
+    // Deteksi apakah yang diklik ini Anggota Resmi atau Tamu
+    const targetUser = profiles.find(p => p.id === orangTerpilih);
+    const namaTarget = targetUser?.nama || orangTerpilih; 
+    const isTamu = !targetUser; 
+
+    setModal(prev => ({
+      ...prev,
+      isOpen: true,
+      type: action === 'approve' ? 'success' : 'warning',
+      title: action === 'approve' ? 'Approve Semua?' : 'Bayar Semua?',
+      message: action === 'approve' 
+        ? `Tandai LUNAS semua tagihan dari ${namaTarget} lintas acara?`
+        : `Tandai semua hutangmu ke ${namaTarget} sebagai 'Menunggu Konfirmasi'?`,
+      onCancel: closeModal,
+      onConfirm: async () => {
+        setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Memproses...', message: 'Memperbarui database...', onCancel: undefined }));
+        
+        // 1. Tentukan tabel target
+        const tabelTarget = isTamu ? 'tagihan_tamu' : 'tagihan';
+        let query = supabase.from(tabelTarget).update(
+          action === 'approve' ? { status: 'Lunas' } : { status: 'Menunggu Konfirmasi' }
+        );
+
+        // 2. Tembak query dengan kolom yang tepat
+        if (action === 'approve') {
+          if (isTamu) {
+             query = query.eq('ke_user_id', currentUser?.id).eq('nama_tamu', orangTerpilih).neq('status', 'Lunas');
+          } else {
+             query = query.eq('ke_user_id', currentUser?.id).eq('dari_user_id', orangTerpilih).neq('status', 'Lunas');
+          }
+        } else {
+          if (isTamu) {
+             query = query.eq('nama_tamu', currentUser?.id).eq('ke_user_id', orangTerpilih).eq('status', 'Belum Bayar');
+          } else {
+             query = query.eq('dari_user_id', currentUser?.id).eq('ke_user_id', orangTerpilih).eq('status', 'Belum Bayar');
+          }
+        }
+
+        const { error } = await query;
+
+        // 3. Update UI jika berhasil
+        if (!error) {
+          setTransfers(prevTf => prevTf.map(tf => {
+            if (action === 'approve' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih) {
+              return { ...tf, status: 'Lunas' };
+            }
+            if (action === 'settle' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih && tf.status === 'Belum Bayar') {
+              return { ...tf, status: 'Menunggu Konfirmasi' };
+            }
+            return tf;
+          }));
+          setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Berhasil!', message: 'Status diperbarui secara massal.', onConfirm: closeModal }));
+        } else {
+          setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: error.message, onConfirm: closeModal }));
+        }
+      }
+    }));
+  };
+
   // --- LOGIKA GROUPING ---
   const sesiHutang = daftarSesi.filter(sesi => 
     transfers.some(tf => tf.id_sesi === sesi.id && tf.dari_user_id === currentUser?.id && tf.status !== 'Lunas')
@@ -119,31 +227,68 @@ export default function RiwayatJajanPage() {
   const piutangSaya = tagihanAktif.filter(tf => tf.ke_user_id === currentUser?.id);
   const tagihanLain = tagihanAktif.filter(tf => tf.dari_user_id !== currentUser?.id && tf.ke_user_id !== currentUser?.id);
 
-  const bagikanKeWA = () => {
-    const sesi = daftarSesi.find(s => s.id === sesiTerpilih);
-    if (!sesi) return;
-    let teks = `📢 *TAGIHAN ACARA: ${sesi.nama}* 📢\n\n`;
-    if (piutangSaya.length > 0) {
-      teks += `Halo gengs! Mohon kerjasamanya untuk pelunasan ya 🙏\n\n*STATUS:* \n`;
-      piutangSaya.forEach(tf => {
-        const pengirim = profiles.find(p => p.id === tf.dari_user_id)?.nama;
-        teks += `- ${pengirim}: ${tf.status === 'Lunas' ? '✅ LUNAS' : `❌ Rp ${Math.round(tf.nominal).toLocaleString('id-ID')}`}\n`;
-      });
-      const my = profiles.find(p => p.id === currentUser?.id);
-      teks += `\n💳 *Bank:* ${my?.nama_bank || 'TBD'} - ${my?.no_rekening || ''}\n`;
+  // ✅ WA MESSAGE UNTUK NETTING
+  const bagikanKeWA = (isNetting = false) => {
+    let teks = "";
+    if (isNetting && orangTerpilih) {
+      const target = profiles.find(p => p.id === orangTerpilih);
+      const namaTarget = target?.nama || orangTerpilih;
+      const saldo = netMap[orangTerpilih] || 0;
+      const absSaldo = Math.abs(Math.round(saldo));
+      
+      teks = `📢 *REKAP SETTLEMENT: ${target?.nama}* 📢\n\n`;
+      teks += `Halo ${target?.nama}, ini rekap saldo plus-minus kita dari semua acara ya:\n\n`;
+      
+      if (saldo > 0) {
+        teks += `*Status:* Kamu ada kurang ke aku sebesar:\n💰 *Rp ${absSaldo.toLocaleString('id-ID')}*\n\n`;
+        const my = profiles.find(p => p.id === currentUser?.id);
+        teks += `💳 *Transfer ke:* ${my?.nama_bank || 'TBD'} - ${my?.no_rekening || ''}\n`;
+      } else {
+        teks += `*Status:* Aku ada kurang ke kamu sebesar:\n💰 *Rp ${absSaldo.toLocaleString('id-ID')}*\n\nMinta rekeningnya dong! 🙏`;
+      }
+      
+      teks += `\n\n_Generated by JajanBareng App_`;
+    } else {
+      const sesi = daftarSesi.find(s => s.id === sesiTerpilih);
+      if (!sesi) return;
+      teks = `📢 *TAGIHAN ACARA: ${sesi.nama}* 📢\n\n`;
+      if (piutangSaya.length > 0) {
+        teks += `Halo gengs! Mohon kerjasamanya untuk pelunasan ya 🙏\n\n*STATUS:* \n`;
+        piutangSaya.forEach(tf => {
+          const pengirim = profiles.find(p => p.id === tf.dari_user_id)?.nama;
+          teks += `- ${pengirim}: ${tf.status === 'Lunas' ? '✅ LUNAS' : `❌ Rp ${Math.round(tf.nominal).toLocaleString('id-ID')}`}\n`;
+        });
+        const my = profiles.find(p => p.id === currentUser?.id);
+        teks += `\n💳 *Bank:* ${my?.nama_bank || 'TBD'} - ${my?.no_rekening || ''}\n`;
+      }
     }
     window.open(`https://wa.me/?text=${encodeURIComponent(teks)}`, '_blank');
   };
 
   const renderKartuTagihan = (tf: StatusTransfer) => {
     const pPengirim = profiles.find(p => p.id === tf.dari_user_id);
+    const namaPengirim = tf.isTamu ? tf.dari_user_id : (pPengirim?.nama || 'Unknown');
     const pPenerima = profiles.find(p => p.id === tf.ke_user_id);
     const isSayaHutang = tf.dari_user_id === currentUser?.id;
     const isSayaPiutang = tf.ke_user_id === currentUser?.id;
     const bankInfo = pPenerima?.nama_bank ? `${pPenerima.nama_bank} - ${pPenerima.no_rekening}` : 'Belum diisi';
 
+    // 🌟 AMBIL INFO DETAIL ACARA / EVENT
+    const infoAcara = daftarSesi.find(s => s.id === tf.id_sesi);
+
     return (
       <div key={tf.id} className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${tf.status === 'Lunas' ? 'border-emerald-200 bg-emerald-50/20' : 'border-slate-200'}`}>
+        
+        {/* 📌 HEADER KARTU: MENUNJUKKAN NAMA EVENT & TIPE ACARA */}
+        <div className="bg-slate-100 px-5 py-2.5 border-b border-slate-200 flex justify-between items-center gap-2">
+          <span className="font-extrabold text-xs text-slate-700 uppercase tracking-wider truncate" title={infoAcara?.nama}>
+            📌 {infoAcara?.nama || 'Acara/Project'}
+          </span>
+          <span className="text-[9px] bg-slate-200 text-slate-600 font-black px-2 py-0.5 rounded uppercase flex-shrink-0">
+            {infoAcara?.warung || 'PROJECT'}
+          </span>
+        </div>
+
         <div className="p-5 border-b border-slate-100">
           <div className="flex justify-between items-start mb-4">
             <div>
@@ -157,7 +302,7 @@ export default function RiwayatJajanPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-            <div className="flex-1 bg-slate-50 p-2.5 rounded-lg text-center border border-slate-100 truncate">{pPengirim?.nama || 'Unknown'}</div>
+            <div className="flex-1 bg-slate-50 p-2.5 rounded-lg text-center border border-slate-100 truncate">{namaPengirim}</div>
             <div className="text-slate-300">➔</div>
             <div className="flex-1 bg-slate-50 p-2.5 rounded-lg text-center border border-slate-100 truncate">{pPenerima?.nama || 'Unknown'}</div>
           </div>
@@ -194,6 +339,16 @@ export default function RiwayatJajanPage() {
     );
   };
 
+  const renderItemOrangKiri = (p: UserProfile, net: number) => (
+    <div key={p.id} onClick={() => setOrangTerpilih(p.id)} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${orangTerpilih === p.id ? 'bg-blue-50 border-blue-500 shadow-md' : 'bg-white border-slate-100 hover:border-slate-300 shadow-sm'}`}>
+      <div className="flex justify-between items-center mb-1">
+        <div className="font-bold text-slate-800 text-sm truncate">{p.nama}</div>
+        <span className={`text-[10px] font-black px-2 py-0.5 rounded ${net > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{net > 0 ? 'PIUTANG' : 'HUTANG'}</span>
+      </div>
+      <div className="text-xs font-black text-slate-900">Rp {Math.abs(Math.round(net)).toLocaleString('id-ID')}</div>
+    </div>
+  );
+
   const renderItemSesiKiri = (sesi: SesiJajan, type: 'hutang' | 'piutang' | 'lunas') => (
     <div key={sesi.id} onClick={() => setSesiTerpilih(sesi.id)} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${sesiTerpilih === sesi.id ? 'bg-blue-50 border-blue-500 shadow-md' : 'bg-white border-slate-100 hover:border-slate-300 shadow-sm'}`}>
       <div className="flex justify-between items-start gap-2 mb-1.5">
@@ -215,61 +370,140 @@ export default function RiwayatJajanPage() {
 
       <header className="mb-8">
         <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Pusat Tagihan 💸</h2>
-        <p className="text-slate-500 mt-2">Daftar hutang piutang riil dari seluruh lapak dan acara.</p>
+        <p className="text-slate-500 mt-2">Daftar hutang piutang para BONGAKss</p>
+        <div className="flex bg-slate-200/50 p-1 rounded-xl w-fit mt-4">
+           <button onClick={() => setViewMode('event')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${viewMode === 'event' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Berdasarkan Acara</button>
+           <button onClick={() => setViewMode('person')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${viewMode === 'person' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Berdasarkan Teman (Netting)</button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* KOLOM KIRI (HP: Scroll Horizontal atau List Pendek) */}
         <div className="lg:col-span-4 space-y-6 max-h-[70vh] lg:max-h-[80vh] overflow-y-auto pr-2 custom-scrollbar">
+          {viewMode === 'event' ? (
+            <>
           <div className="space-y-2">
             <h3 className="text-xs font-black text-rose-700 uppercase tracking-wider px-1">🚨 Perlu Kamu Bayar ({sesiHutang.length})</h3>
             {sesiHutang.length === 0 ? <div className="bg-slate-100/50 p-3 rounded-xl border border-dashed text-slate-400 text-xs text-center italic">Bebas hutang! ✨</div> : sesiHutang.map(s => renderItemSesiKiri(s, 'hutang'))}
           </div>
-
           <div className="space-y-2">
             <h3 className="text-xs font-black text-emerald-700 uppercase tracking-wider px-1">💰 Perlu Kamu Tagih ({sesiPiutang.length})</h3>
             {sesiPiutang.length === 0 ? <div className="bg-slate-100/50 p-3 rounded-xl border border-dashed text-slate-400 text-xs text-center italic">Tidak ada tagihan keluar.</div> : sesiPiutang.map(s => renderItemSesiKiri(s, 'piutang'))}
           </div>
-
-          <div className="space-y-2 pt-2 border-t border-slate-200">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">✅ Selesai / Lainnya ({sesiLunasDanLainnya.length})</h3>
-            {sesiLunasDanLainnya.map(s => renderItemSesiKiri(s, 'lunas'))}
-          </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <h3 className="text-xs font-black text-blue-700 uppercase tracking-wider px-1">👥 Daftar Teman ({listOrangTerkait.length})</h3>
+              {listOrangTerkait.length === 0 ? <div className="bg-slate-100/50 p-3 rounded-xl border border-dashed text-slate-400 text-xs text-center italic">Tidak ada saldo gantung.</div> : listOrangTerkait.map(p => renderItemOrangKiri(p, netMap[p.id]))}
+            </div>
+          )}
         </div>
 
-        {/* KOLOM KANAN (DETAIL) */}
         <div className="lg:col-span-8">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-slate-900">Rincian Penagihan</h3>
-            {sesiTerpilih && piutangSaya.length > 0 && (
-              <button onClick={bagikanKeWA} className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 transition-colors">📲 Tagih via WA</button>
-            )}
-          </div>
-
-          {!sesiTerpilih ? (
-            <div className="bg-white rounded-3xl border border-dashed border-slate-300 p-12 text-center text-slate-400 text-sm">Pilih acara di sebelah kiri untuk melihat rincian.</div>
-          ) : tagihanAktif.length === 0 ? (
-            <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center text-slate-400 text-sm italic">Tidak ada pergerakan hutang di acara ini. 🎉</div>
-          ) : (
-            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div>
-                <h4 className="font-bold text-rose-700 mb-4 flex items-center gap-2"><span>💸</span> Hutang Saya Ke Teman</h4>
-                {hutangSaya.length === 0 ? <div className="bg-white p-4 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs italic">Lunas / Tidak ada hutang Anda di sini.</div> 
-                : <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{hutangSaya.map(tf => renderKartuTagihan(tf))}</div>}
-              </div>
-
-              <div>
-                <h4 className="font-bold text-emerald-700 mb-4 flex items-center gap-2"><span>🤑</span> Piutang Teman Ke Saya</h4>
-                {piutangSaya.length === 0 ? <div className="bg-white p-4 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs italic">Tidak ada piutang aktif untuk Anda.</div>
-                : <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{piutangSaya.map(tf => renderKartuTagihan(tf))}</div>}
-              </div>
-
-              {tagihanLain.length > 0 && (
-                <div className="opacity-70 pt-4 border-t border-slate-200">
-                  <h4 className="font-bold text-slate-500 mb-4 flex items-center gap-2"><span>👥</span> Alur Hutang Anggota Lain</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{tagihanLain.map(tf => renderKartuTagihan(tf))}</div>
+          {viewMode === 'person' && orangTerpilih ? (
+            <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm mb-6 flex justify-between items-center">
+                <div>
+                   <h3 className="font-bold text-slate-500 text-xs uppercase mb-1">Total Net Saldo dengan {profiles.find(p=>p.id===orangTerpilih)?.nama || orangTerpilih}</h3>
+                   <div className={`text-2xl font-black ${netMap[orangTerpilih] > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {netMap[orangTerpilih] > 0 ? 'Dapat Uang' : 'Bayar Uang'} Rp {Math.abs(Math.round(netMap[orangTerpilih] || 0)).toLocaleString('id-ID')}
+                   </div>
+                   <p className="text-[10px] text-slate-400 mt-1 italic">*Kalkulasi netting hanya menghitung tagihan berstatus 'Belum Bayar'.</p>
                 </div>
-              )}
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => bagikanKeWA(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
+                    📲 REKAP WA
+                  </button>
+                  {netMap[orangTerpilih] < 0 && (
+                    <button onClick={() => handleBatchUpdate('settle')} className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
+                      🚀 BAYAR SEMUA
+                    </button>
+                  )}
+                  {netMap[orangTerpilih] > 0 && (
+                    <button onClick={() => handleBatchUpdate('approve')} className="bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
+                      ✅ APPROVE ALL
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 🌟 SPLIT LAYOUT: SISI KIRI (HUTANG SAYA) & SISI KANAN (PIUTANG SAYA) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                
+                {/* 📉 SISI KIRI: HUTANG SAYA KE DIA */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-rose-600 uppercase tracking-widest border-b border-rose-100 pb-2 flex items-center gap-1.5">
+                    📉 Hutang Saya Ke Dia ({transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih).length})
+                  </h4>
+                  <div className="space-y-4">
+                    {transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih).length === 0 ? (
+                      <div className="text-center py-8 text-slate-400 text-xs italic bg-white rounded-2xl border border-dashed border-slate-200">
+                        Aman bwang, kamu ga ada hutang ke dia.
+                      </div>
+                    ) : (
+                      transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih).map(tf => renderKartuTagihan(tf))
+                    )}
+                  </div>
+                </div>
+
+                {/* 📈 SISI KANAN: PIUTANG SAYA KE DIA */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2 flex items-center gap-1.5">
+                    📈 Piutang Saya Ke Dia ({transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih).length})
+                  </h4>
+                  <div className="space-y-4">
+                    {transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih).length === 0 ? (
+                      <div className="text-center py-8 text-slate-400 text-xs italic bg-white rounded-2xl border border-dashed border-slate-200">
+                        Ga ada tagihan aktif ke dia saat ini.
+                      </div>
+                    ) : (
+                      transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih).map(tf => renderKartuTagihan(tf))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          ) : viewMode === 'event' && sesiTerpilih ? (
+            
+            /* ✅ RENDER DETAIL EVENT YANG SEBELUMNYA KOSONG */
+            <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+              
+              {/* Header Info Acara */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm mb-6 flex justify-between items-center">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-lg">
+                    {daftarSesi.find(s => s.id === sesiTerpilih)?.nama || 'Acara Tidak Ditemukan'}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1">
+                    {daftarSesi.find(s => s.id === sesiTerpilih)?.tanggal}
+                  </p>
+                </div>
+                {tagihanAktif.some(tf => tf.ke_user_id === currentUser?.id && tf.status !== 'Lunas') && (
+                  <button onClick={() => bagikanKeWA(false)} className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black px-4 py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all">
+                    📲 TAGIH VIA WA
+                  </button>
+                )}
+              </div>
+              
+              {/* Looping Kartu Tagihan per Acara */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {tagihanAktif.length === 0 ? (
+                  <div className="col-span-full p-8 text-center flex flex-col items-center text-slate-400 italic bg-white rounded-3xl border border-dashed border-slate-200 shadow-sm">
+                     <span className="text-4xl mb-3 opacity-50">💸</span>
+                     <span>Semua tagihan di acara ini sudah selesai/kosong.</span>
+                  </div>
+                ) : (
+                  tagihanAktif.map(tf => renderKartuTagihan(tf))
+                )}
+              </div>
+
+            </div>
+
+          ) : (
+            /* ✅ TAMPILAN DEFAULT SAAT BELUM ADA YANG DIKLIK */
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-50 pt-20">
+              <span className="text-6xl mb-4 animate-bounce">👆</span>
+              <p className="font-bold">Pilih daftar di sebelah kiri untuk melihat detail.</p>
             </div>
           )}
         </div>
