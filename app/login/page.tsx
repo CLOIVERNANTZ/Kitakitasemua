@@ -70,9 +70,10 @@ export default function LoginPage() {
     setError('');
     setSuccessMsg('');
 
-    const formattedPhone = formatPhoneNumber(phone);
-
+    // 1. LOGIKA MODE: LOGIN
     if (mode === 'login') {
+      const formattedPhone = formatPhoneNumber(phone);
+
       const { data: profile, error: searchError } = await supabase
         .from('profiles')
         .select('email, no_hp')
@@ -94,19 +95,25 @@ export default function LoginPage() {
         setError('Password yang Anda masukkan salah.');
         setLoading(false);
       } else {
-        router.push('/'); 
+        router.push('/');
       }
 
+      // 2. LOGIKA MODE: REGISTER
     } else if (mode === 'register') {
-      // 1. Daftarkan Akun di Auth
+      const formattedPhone = formatPhoneNumber(phone);
+
+      // Daftarkan Akun di Auth
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: email,
         password: password,
       });
 
-      // Tangkap error kosong `{}` agar menjadi teks yang bisa dibaca
       if (signUpError) {
-        setError(JSON.stringify(signUpError) === '{}' ? 'Gagal mendaftar. Pastikan Confirm Email di Supabase sudah dimatikan.' : signUpError.message);
+        setError(
+          JSON.stringify(signUpError) === '{}'
+            ? 'Gagal mendaftar. Pastikan Confirm Email di Supabase sudah dimatikan.'
+            : signUpError.message
+        );
         setLoading(false);
         return;
       }
@@ -114,7 +121,7 @@ export default function LoginPage() {
       if (authData?.user) {
         let finalAvatarUrl = '';
 
-        // 2. PROSES UPLOAD FOTO (Jika user memilih foto)
+        // PROSES UPLOAD FOTO
         if (avatarFile) {
           const fileExt = avatarFile.name.split('.').pop();
           const fileName = `${authData.user.id}-${Date.now()}.${fileExt}`;
@@ -129,7 +136,7 @@ export default function LoginPage() {
           }
         }
 
-        // 3. Simpan Profil ke Database beserta URL Fotonya
+        // Simpan Profil ke Database beserta URL Fotonya
         const { error: profileError } = await supabase
           .from('profiles')
           .insert({
@@ -137,13 +144,12 @@ export default function LoginPage() {
             nama: username,
             email: email,
             no_hp: formattedPhone,
-            avatar_url: finalAvatarUrl // 👈 SIMPAN LINK FOTO KE DATABASE
+            avatar_url: finalAvatarUrl,
           });
 
         if (profileError) {
           setError('Akun berhasil dibuat, tapi gagal menyimpan profil: ' + profileError.message);
         } else {
-
           setSuccessMsg('Berhasil daftar! Tapi akunmu belum aktif. Silakan lapor ke bang RINGO, biar di ACC');
           setMode('login');
           setPassword('');
@@ -151,8 +157,27 @@ export default function LoginPage() {
         }
       }
       setLoading(false);
+
+      // 3. LOGIKA MODE: LUPA PASSWORD (Hanya Butuh Email)
+    } else if (mode === 'forgot_password') {
+      if (!email) {
+        setError('Masukkan alamat email resmi Anda dulu bwang.');
+        setLoading(false);
+        return;
+      }
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (resetError) {
+        setError('Gagal mengirim email reset: ' + resetError.message);
+      } else {
+        setSuccessMsg('Mantap! Link reset password udah dikirim ke emailmu. Cek inbox/spam ya!');
+        setMode('login');
+      }
+      setLoading(false);
     }
-    // Forgot Password skip dulu buat fokus slideshow
   };
 
   return (
@@ -228,7 +253,7 @@ export default function LoginPage() {
                 </span>
                 <input
                   type="tel"
-                  required
+                  required={mode === 'login' || mode === 'register'} // 👈 Menggunakan kondisi positif yang aman dari error linting
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
                   placeholder="81234567890"
                   value={phone.replace('+62', '')}
@@ -252,12 +277,13 @@ export default function LoginPage() {
             </div>
           )}
 
-          {mode === 'register' && (
+          {/* AREA INPUT EMAIL (Muncul saat Register ATAU Lupa Password) */}
+          {(mode === 'register' || mode === 'forgot_password') && (
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1">Alamat Email Resmi</label>
               <input
                 type="email"
-                required
+                required={mode === 'register' || mode === 'forgot_password'}
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
                 placeholder="kamu@email.com"
                 value={email}
@@ -266,6 +292,7 @@ export default function LoginPage() {
             </div>
           )}
 
+          {/* AREA INPUT PASSWORD (Hanya muncul jika BUKAN forgot_password) */}
           {mode !== 'forgot_password' && (
             <div>
               <div className="flex justify-between items-center mb-1">
@@ -273,7 +300,7 @@ export default function LoginPage() {
               </div>
               <input
                 type="password"
-                required
+                required={mode === 'login' || mode === 'register'}
                 minLength={6}
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
                 placeholder="••••••••"
@@ -295,19 +322,56 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-center text-xs text-slate-500 space-y-2 font-medium">
+        <div className="mt-6 text-center text-xs text-slate-500 space-y-3 font-medium">
+          {/* TAMPILAN SAAT MODE LOGIN */}
           {mode === 'login' && (
+            <>
+              <p>
+                Belum terdaftar di sirkel?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setMode('register'); setError(''); setSuccessMsg(''); }}
+                  className="font-black text-amber-600 hover:underline"
+                >
+                  Gabung di sini bwang
+                </button>
+              </p>
+              <p>
+                <button
+                  type="button"
+                  onClick={() => { setMode('forgot_password'); setError(''); setSuccessMsg(''); }}
+                  className="font-bold text-rose-500 hover:underline"
+                >
+                  Lupa Password? Waduh...
+                </button>
+              </p>
+            </>
+          )}
+
+          {/* TAMPILAN SAAT MODE REGISTER */}
+          {mode === 'register' && (
             <p>
-              Belum terdaftar di sirkel?{' '}
-              <button type="button" onClick={() => { setMode('register'); setError(''); setSuccessMsg(''); }} className="font-black text-amber-600 hover:underline">
-                Gabung di sini bwang
+              Sudah punya akun?{' '}
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setError(''); setSuccessMsg(''); }}
+                className="font-black text-slate-700 hover:underline"
+              >
+                ← Kembali ke Pintu Depan
               </button>
             </p>
           )}
-          {mode !== 'login' && (
+
+          {/* TAMPILAN SAAT MODE FORGOT PASSWORD */}
+          {mode === 'forgot_password' && (
             <p>
-              <button type="button" onClick={() => { setMode('login'); setError(''); setSuccessMsg(''); }} className="font-black text-slate-700 hover:underline">
-                ← Kembali ke Pintu Depan
+              Ingat password-nya?{' '}
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setError(''); setSuccessMsg(''); }}
+                className="font-black text-amber-600 hover:underline"
+              >
+                Coba Login Lagi bwang
               </button>
             </p>
           )}
