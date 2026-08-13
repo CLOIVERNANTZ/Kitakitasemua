@@ -9,6 +9,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
 
   const [profile, setProfile] = useState<{ id: string, nama: string, avatar_url: string | null } | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -27,6 +28,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         setIsCheckingAuth(false);
         return;
       }
+      setUserEmail(user.email ?? null);
 
       // ✅ Ambil juga is_approved dari database
       const { data: initialData } = await supabase
@@ -229,6 +231,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link href="/dashboard/bongak" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/bongak') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
               🤪 BONGAK
             </Link>
+            
+            {userEmail === 'germansiringo1234@gmail.com' && (
+              <Link href="/dashboard/sticker" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/sticker') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                🎞️ Bikin Sticker / GIF
+              </Link>
+            )}
           </nav>
         </div>
 
