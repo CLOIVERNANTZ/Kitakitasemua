@@ -131,19 +131,57 @@ function NginapKuyContent() {
     setInputItem(''); setInputHarga('');
   };
 
+  // UTILITY KOMPRESI GAMBAR UNTUK MENGATASI LIMIT 1MB OCR.SPACE
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          const MAX_DIM = 1200;
+          if (width > height) {
+            if (width > MAX_DIM) {
+              height = Math.round((height *= MAX_DIM / width));
+              width = MAX_DIM;
+            }
+          } else {
+            if (height > MAX_DIM) {
+              width = Math.round((width *= MAX_DIM / height));
+              height = MAX_DIM;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(compressedBase64);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
+
   // ✅ LOGIKA SCAN STRUK DAN COMBINE BIAYA
   const handleOcrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsOcrLoading(true);
-    setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Membaca Struk...', message: 'Google AI sedang memindai baris teks bill Anda...', onCancel: undefined }));
+    setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Menyiapkan Gambar...', message: 'Mengompres foto agar lolos batas OCR...', onCancel: undefined }));
 
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-      try {
-        const base64Result = reader.result as string;
+    try {
+      const base64Result = await compressImage(file);
+      
+      setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Membaca Struk...', message: 'Google AI sedang memindai baris teks bill Anda...', onCancel: undefined }));
         
         // Tembak API Route internal kita
         const res = await fetch('/api/ocr', {
@@ -153,6 +191,10 @@ function NginapKuyContent() {
         });
 
         const data = await res.json();
+
+        if (data.error) {
+          throw new Error(data.error);
+        }
 
         if (data.items && data.items.length > 0) {
           // 🌟 KUNCI LOGIKA: Gabungkan data lama (manual) dengan data baru hasil OCR Google
@@ -164,14 +206,13 @@ function NginapKuyContent() {
             onConfirm: closeModal
           }));
         } else {
-          setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Jelas', message: 'Google tidak menemukan format nama item & harga yang cocok. Silakan input manual atau coba foto lebih dekat.', onConfirm: closeModal }));
+          setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Jelas', message: 'Tidak menemukan format nama item & harga yang cocok. Silakan input manual atau coba foto lebih dekat.', onConfirm: closeModal }));
         }
-      } catch (err) {
-        setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Scan', message: 'Terjadi kegagalan koneksi sistem OCR.', onConfirm: closeModal }));
+      } catch (err: any) {
+        setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Scan', message: err.message || 'Terjadi kegagalan koneksi sistem OCR.', onConfirm: closeModal }));
       } finally {
         setIsOcrLoading(false);
       }
-    };
   };
 
   const handleUbahPartisipan = (id: string, field: 'ikut' | 'isGratis', value: boolean) => {
