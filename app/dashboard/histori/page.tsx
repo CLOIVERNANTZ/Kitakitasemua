@@ -81,7 +81,7 @@ export default function HistoriAcaraPage() {
               
               <div className="flex items-center gap-4 sm:justify-end">
                 <div className="text-right">
-                  <div className="font-black text-slate-800 text-lg">Rp {Number(sesi.total_biaya || 0).toLocaleString('id-ID')}</div>
+                  <div className="font-black text-slate-800 text-lg">Rp {Math.round(Number(sesi.total_biaya || 0)).toLocaleString('id-ID')}</div>
                   <div className="text-[11px] font-semibold text-slate-400">{sesi.partisipan_ids?.length || 0} Partisipan</div>
                 </div>
               </div>

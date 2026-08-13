@@ -151,13 +151,13 @@ export default function DashboardPage() {
           <div className="absolute top-0 w-full h-2 bg-rose-500"></div>
           <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-rose-100">💸</div>
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hutang Berjalan Anda</p>
-          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {totalHutangBerjalan.toLocaleString('id-ID')}</h4>
+          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {Math.round(totalHutangBerjalan).toLocaleString('id-ID')}</h4>
         </div>
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
           <div className="absolute top-0 w-full h-2 bg-emerald-500"></div>
           <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-emerald-100">🤑</div>
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Piutang (Uang Anda)</p>
-          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {totalPiutangBerjalan.toLocaleString('id-ID')}</h4>
+          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {Math.round(totalPiutangBerjalan).toLocaleString('id-ID')}</h4>
         </div>
       </div>
 
@@ -193,7 +193,7 @@ export default function DashboardPage() {
                 
                 <div className="flex items-center gap-4 sm:justify-end">
                   <div className="text-right">
-                    <div className="font-black text-slate-800 text-lg">Rp {Number(sesi.total_biaya || 0).toLocaleString('id-ID')}</div>
+                    <div className="font-black text-slate-800 text-lg">Rp {Math.round(Number(sesi.total_biaya || 0)).toLocaleString('id-ID')}</div>
                     <div className="text-[11px] font-semibold text-slate-400">{sesi.partisipan_ids?.length || 0} Partisipan</div>
                   </div>
                   

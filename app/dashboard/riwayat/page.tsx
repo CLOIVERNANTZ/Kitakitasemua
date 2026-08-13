@@ -13,7 +13,7 @@ export default function RiwayatJajanPage() {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [daftarSesi, setDaftarSesi] = useState<SesiJajan[]>([]);
   const [sesiTerpilih, setSesiTerpilih] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'event' | 'person'>('event'); // 👈 Mode tampilan baru
+  const [viewMode, setViewMode] = useState<'event' | 'person'>('person'); // 👈 Netting default
   const [orangTerpilih, setOrangTerpilih] = useState<string | null>(null);
   
   const [transfers, setTransfers] = useState<StatusTransfer[]>([]);
@@ -454,7 +454,7 @@ export default function RiwayatJajanPage() {
       </div>
       <div className="flex justify-between items-center text-[11px] text-slate-500 font-medium">
         <span className="uppercase px-2 py-0.5 bg-slate-50 border border-slate-200 rounded text-[10px] truncate max-w-[100px]">{sesi.warung}</span>
-        <span className="font-bold text-slate-700 whitespace-nowrap">Rp {sesi.total.toLocaleString('id-ID')}</span>
+        <span className="font-bold text-slate-700 whitespace-nowrap">Rp {Math.round(sesi.total).toLocaleString('id-ID')}</span>
       </div>
     </div>
   );
@@ -519,8 +519,8 @@ export default function RiwayatJajanPage() {
         <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Pusat Tagihan 💸</h2>
         <p className="text-slate-500 mt-2">Daftar hutang piutang para BONGAKss</p>
         <div className="flex bg-slate-200/50 p-1 rounded-xl w-fit mt-4">
-           <button onClick={() => setViewMode('event')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${viewMode === 'event' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Berdasarkan Acara</button>
            <button onClick={() => setViewMode('person')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${viewMode === 'person' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Berdasarkan Teman (Netting)</button>
+           <button onClick={() => setViewMode('event')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${viewMode === 'event' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Berdasarkan Acara</button>
         </div>
       </header>
 

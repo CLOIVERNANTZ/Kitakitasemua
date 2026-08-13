@@ -76,18 +76,21 @@ export default function LoginPage() {
     // 1. LOGIKA MODE: LOGIN
     if (mode === 'login') {
       const formattedPhone = formatPhoneNumber(phone);
+      const rawPhone = formattedPhone.replace('+62', '');
+      const zeroPhone = '0' + rawPhone;
 
-      const { data: profile, error: searchError } = await supabase
+      const { data: profilesData, error: searchError } = await supabase
         .from('profiles')
         .select('email, no_hp')
-        .eq('no_hp', formattedPhone)
-        .single();
+        .or(`no_hp.eq.${formattedPhone},no_hp.eq.${rawPhone},no_hp.eq.${zeroPhone}`);
 
-      if (searchError || !profile) {
+      if (searchError || !profilesData || profilesData.length === 0) {
         setError('Nomor HP belum terdaftar di JajanBareng.');
         setLoading(false);
         return;
       }
+
+      const profile = profilesData[0];
 
       const { error: loginError } = await supabase.auth.signInWithPassword({
         email: profile.email,
