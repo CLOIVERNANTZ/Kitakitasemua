@@ -203,75 +203,112 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           </div>
           
-          <nav className="p-4 space-y-1.5 overflow-y-auto max-h-[calc(100vh-200px)] custom-scrollbar">
-            <Link href="/dashboard" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              🏠 Beranda
-            </Link>
-            <Link href="/dashboard/profile" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/profile') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              👤 Profil Saya
-            </Link>
-            <Link href="/dashboard/jajan" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/jajan') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              🍔 Jajan Kuy
-            </Link>
-            <Link href="/dashboard/nginap" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/nginap') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              🏨 Nginap Kuy
-            </Link>
-            <Link href="/dashboard/lapak" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/lapak') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              📊 Project Kita Kuy
-            </Link>
-            <Link href="/dashboard/riwayat" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/riwayat') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              📜 Riwayat Tagihan
-            </Link>
-            <Link href="/dashboard/histori" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/histori') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              📂 Histori Acara
-            </Link>
-            <Link href="/dashboard/gallery" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/gallery') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              📸 Galeri KitaKitaSemua
-            </Link>
-            <Link href="/dashboard/bongak" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/bongak') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-              🤪 BONGAK
-            </Link>
+          {/* USER PROFILE MOVED TO TOP */}
+          {profile && (
+            <div className="px-4 py-4 border-b border-slate-100 bg-slate-50/30">
+              <div className="flex items-center gap-3 p-2.5 bg-white rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
+                <div
+                  className="relative w-10 h-10 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center font-black text-blue-700 cursor-pointer overflow-hidden group flex-shrink-0 shadow-sm transition-all hover:border-blue-400"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Klik untuk ganti foto profil"
+                >
+                  {isUploading ? (
+                    <span className="text-[10px] animate-pulse">⏳</span>
+                  ) : profile.avatar_url ? (
+                    <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    (profile.nama || 'U').charAt(0).toUpperCase()
+                  )}
+                  <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-white text-xs">📷</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-slate-900 truncate">{profile.nama || 'User'}</p>
+                  <p className="text-[9px] font-bold text-emerald-600 truncate uppercase flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block animate-pulse"></span> Online
+                  </p>
+                </div>
+                <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleAvatarUpload} />
+              </div>
+            </div>
+          )}
+
+          <nav className="p-4 space-y-5 overflow-y-auto max-h-[calc(100vh-250px)] custom-scrollbar">
             
+            {/* BERANDA */}
+            <div>
+              <p className="px-3 text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Beranda</p>
+              <div className="space-y-0.5">
+                <Link href="/dashboard" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  🏠 Beranda
+                </Link>
+              </div>
+            </div>
+
+            {/* ACARA */}
+            <div>
+              <p className="px-3 text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Acara</p>
+              <div className="space-y-0.5">
+                <Link href="/dashboard/jajan" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/jajan') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  🍔 Jajan
+                </Link>
+                <Link href="/dashboard/nginap" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/nginap') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  🏨 Nginap
+                </Link>
+                <Link href="/dashboard/lapak" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/lapak') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  📊 Project
+                </Link>
+              </div>
+            </div>
+
+            {/* TAGIHAN */}
+            <div>
+              <p className="px-3 text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Tagihan</p>
+              <div className="space-y-0.5">
+                <Link href="/dashboard/riwayat" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/riwayat') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  📜 Riwayat Tagihan
+                </Link>
+                <Link href="/dashboard/histori" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/histori') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  📂 Histori Acara
+                </Link>
+              </div>
+            </div>
+
+            {/* KITAKITASEMUA */}
+            <div>
+              <p className="px-3 text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">KitaKitaSemua</p>
+              <div className="space-y-0.5">
+                <Link href="/dashboard/profile" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/profile') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  👤 Profil
+                </Link>
+                <Link href="/dashboard/gallery" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/gallery') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  📸 Galeri
+                </Link>
+                <Link href="/dashboard/bongak" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/bongak') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                  🤪 Bongak
+                </Link>
+              </div>
+            </div>
+
+            {/* STICKER */}
             {userEmail === 'germansiringo1234@gmail.com' && (
-              <Link href="/dashboard/sticker" className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-sm transition-all ${isActive('/dashboard/sticker') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-                🎞️ Bikin Sticker / GIF
-              </Link>
+              <div>
+                <p className="px-3 text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Eksklusif</p>
+                <div className="space-y-0.5">
+                  <Link href="/dashboard/sticker" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/sticker') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                    🎞️ Sticker
+                  </Link>
+                </div>
+              </div>
             )}
           </nav>
         </div>
 
         {/* BOTTOM SECTION */}
         <div className="p-4 border-t border-slate-100 bg-slate-50/50 space-y-3 pb-safe">
-          {profile && (
-            <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-sm transition-all">
-              <div
-                className="relative w-11 h-11 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center font-black text-blue-700 cursor-pointer overflow-hidden group flex-shrink-0 shadow-sm transition-all hover:border-blue-400"
-                onClick={() => fileInputRef.current?.click()}
-                title="Klik untuk ganti foto profil"
-              >
-                {isUploading ? (
-                  <span className="text-[10px] animate-pulse">⏳</span>
-                ) : profile.avatar_url ? (
-                  <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  (profile.nama || 'U').charAt(0).toUpperCase()
-                )}
-                <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="text-white text-xs">📷</span>
-                </div>
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-slate-900 truncate">{profile.nama || 'User'}</p>
-                <p className="text-[10px] font-bold text-emerald-600 truncate uppercase flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block animate-pulse"></span> Online
-                </p>
-              </div>
-              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleAvatarUpload} />
-            </div>
-          )}
-
-          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-3 text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl font-bold text-sm transition-all touch-manipulation">
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl font-bold text-xs transition-all touch-manipulation">
             🚪 Keluar Aplikasi
           </button>
         </div>

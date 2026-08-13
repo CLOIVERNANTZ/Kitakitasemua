@@ -78,25 +78,46 @@ export default function RiwayatJajanPage() {
     // Cari tahu apakah item target merupakan tagihan tamu atau bukan
     const targetTf = transfers.find(tf => tf.id === idTransfer);
     const tabelTarget = targetTf?.isTamu ? 'tagihan_tamu' : 'tagihan';
+    
+    // Deteksi jika yang ditolak adalah transaksi Netting Batch
+    const isTolakBatch = statusBaru === 'Belum Bayar' && targetTf?.bukti_url?.includes('tf-batch-');
 
     setModal(prev => ({
       ...prev,
       isOpen: true,
       type: statusBaru === 'Lunas' ? 'success' : 'warning',
-      title: statusBaru === 'Lunas' ? 'Validasi Lunas?' : 'Batalkan?',
-      message: statusBaru === 'Lunas' ? 'Cek lagi weh, siapa tau dia boong!!.' : 'ih gk benar, buat dia Belum Bayar.',
+      title: statusBaru === 'Lunas' ? 'Validasi Lunas?' : (isTolakBatch ? 'Tolak Netting?' : 'Batalkan?'),
+      message: statusBaru === 'Lunas' 
+        ? 'Cek lagi weh, siapa tau dia boong!!.' 
+        : (isTolakBatch ? 'Ini adalah transfer Netting Jalan Tol. Menolak ini akan mengembalikan semua Hutang & Piutang di dalamnya kembali ke awal (Belum Bayar).' : 'ih gk benar, buat dia Belum Bayar.'),
       onCancel: closeModal,
       onConfirm: async () => {
         setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Savaarrrrr bwang...', message: 'udah beresss...', onCancel: undefined }));
         
-        // 🌟 Mengupdate berdasarkan nama tabel yang sesuai
-        const { error } = await supabase.from(tabelTarget).update({ status: statusBaru }).eq('id', idTransfer);
-
-        if (!error) {
-          setTransfers(prevTf => prevTf.map(tf => tf.id === idTransfer ? { ...tf, status: statusBaru } : tf));
-          setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Berhasil!', message: 'Status pembayaran diperbarui.', onConfirm: closeModal }));
+        if (isTolakBatch && targetTf?.bukti_url) {
+           // REVERT BATCH NETTING
+           const { error } = await supabase.from(tabelTarget)
+               .update({ status: 'Belum Bayar', bukti_url: null })
+               .eq('bukti_url', targetTf.bukti_url);
+           
+           if (!error) {
+              setTransfers(prevTf => prevTf.map(tf => tf.bukti_url === targetTf.bukti_url ? { ...tf, status: 'Belum Bayar', bukti_url: undefined } : tf));
+              setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Netting Dibatalkan', message: 'Semua tagihan dalam netting ini berhasil dikembalikan ke awal.', onConfirm: closeModal }));
+           } else {
+              setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: error.message, onConfirm: closeModal }));
+           }
         } else {
-          setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: error.message, onConfirm: closeModal }));
+           // NORMAL UPDATE
+           const { error } = await supabase.from(tabelTarget)
+               .update({ status: statusBaru, bukti_url: statusBaru === 'Belum Bayar' ? null : targetTf?.bukti_url })
+               .eq('id', idTransfer);
+
+           if (!error) {
+             setTransfers(prevTf => prevTf.map(tf => tf.id === idTransfer ? { ...tf, status: statusBaru, bukti_url: statusBaru === 'Belum Bayar' ? undefined : tf.bukti_url } : tf));
+             setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Berhasil!', message: 'Status pembayaran diperbarui.', onConfirm: closeModal }));
+           } else {
+             setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: error.message, onConfirm: closeModal }));
+           }
         }
       }
     }));
@@ -210,6 +231,65 @@ export default function RiwayatJajanPage() {
     }));
   };
 
+  const handleBatchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!orangTerpilih) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Mengunggah...', message: 'Memproses Netting (Jalan Tol)...', onCancel: undefined }));
+    
+    const fileExt = file.name.split('.').pop();
+    const fileName = `tf-batch-${orangTerpilih}-${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, file);
+
+    if (uploadError) {
+      setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Upload', message: 'Pastikan bucket "receipts" sudah dibuat di Supabase!', onConfirm: closeModal }));
+      return;
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(fileName);
+
+    const targetUser = profiles.find(p => p.id === orangTerpilih);
+    const isTamu = !targetUser;
+    const tabelTarget = isTamu ? 'tagihan_tamu' : 'tagihan';
+
+    // 1. HUTANG SAYA -> Menunggu Konfirmasi & Set Bukti TF
+    let query1 = supabase.from(tabelTarget).update({ status: 'Menunggu Konfirmasi', bukti_url: publicUrl });
+    if (isTamu) {
+      query1 = query1.eq('nama_tamu', currentUser?.id).eq('ke_user_id', orangTerpilih).eq('status', 'Belum Bayar');
+    } else {
+      query1 = query1.eq('dari_user_id', currentUser?.id).eq('ke_user_id', orangTerpilih).eq('status', 'Belum Bayar');
+    }
+
+    // 2. PIUTANG SAYA -> Lunas Instan (Netting Jalan Tol)
+    let query2 = supabase.from(tabelTarget).update({ status: 'Lunas', bukti_url: publicUrl });
+    if (isTamu) {
+      query2 = query2.eq('nama_tamu', orangTerpilih).eq('ke_user_id', currentUser?.id).eq('status', 'Belum Bayar');
+    } else {
+      query2 = query2.eq('dari_user_id', orangTerpilih).eq('ke_user_id', currentUser?.id).eq('status', 'Belum Bayar');
+    }
+
+    const [res1, res2] = await Promise.all([query1, query2]);
+
+    if (!res1.error && !res2.error) {
+      setTransfers(prevTf => prevTf.map(tf => {
+        // Update state Hutang Saya
+        if (tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih && tf.status === 'Belum Bayar') {
+          return { ...tf, status: 'Menunggu Konfirmasi', bukti_url: publicUrl };
+        }
+        // Update state Piutang Saya
+        if (tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih && tf.status === 'Belum Bayar') {
+          return { ...tf, status: 'Lunas', bukti_url: publicUrl };
+        }
+        return tf;
+      }));
+      setModal(p => ({ ...p, isOpen: true, type: 'success', title: 'Netting Sukses! 🚀', message: 'Hutangmu menunggu konfirmasi, dan Piutangmu telah dilunaskan otomatis.', onConfirm: closeModal }));
+    } else {
+      setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: res1.error?.message || res2.error?.message || 'Unknown Error', onConfirm: closeModal }));
+    }
+  };
+
   // --- LOGIKA GROUPING ---
   const sesiHutang = daftarSesi.filter(sesi => 
     transfers.some(tf => tf.id_sesi === sesi.id && tf.dari_user_id === currentUser?.id && tf.status !== 'Lunas')
@@ -226,6 +306,11 @@ export default function RiwayatJajanPage() {
   const hutangSaya = tagihanAktif.filter(tf => tf.dari_user_id === currentUser?.id);
   const piutangSaya = tagihanAktif.filter(tf => tf.ke_user_id === currentUser?.id);
   const tagihanLain = tagihanAktif.filter(tf => tf.dari_user_id !== currentUser?.id && tf.ke_user_id !== currentUser?.id);
+
+  const hutangKeOrangTerpilih = transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih);
+  const piutangKeOrangTerpilih = transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih);
+  const totalHutangKeOrangTerpilih = hutangKeOrangTerpilih.reduce((acc, tf) => acc + tf.nominal, 0);
+  const totalPiutangKeOrangTerpilih = piutangKeOrangTerpilih.reduce((acc, tf) => acc + tf.nominal, 0);
 
   // ✅ WA MESSAGE UNTUK NETTING
   const bagikanKeWA = (isNetting = false) => {
@@ -307,10 +392,12 @@ export default function RiwayatJajanPage() {
             <div className="flex-1 bg-slate-50 p-2.5 rounded-lg text-center border border-slate-100 truncate">{pPenerima?.nama || 'Unknown'}</div>
           </div>
         </div>
-        <div className="px-5 py-3 bg-slate-50 text-xs flex justify-between items-center border-b border-slate-100">
-          <span className="text-slate-500 font-medium">Bank Tujuan:</span>
-          <span className={`font-bold ${pPenerima?.nama_bank ? 'text-slate-800' : 'text-rose-500 italic'}`}>{bankInfo}</span>
-        </div>
+        {viewMode !== 'person' && (
+          <div className="px-5 py-3 bg-slate-50 text-xs flex justify-between items-center border-b border-slate-100">
+            <span className="text-slate-500 font-medium">Bank Tujuan:</span>
+            <span className={`font-bold ${pPenerima?.nama_bank ? 'text-slate-800' : 'text-rose-500 italic'}`}>{bankInfo}</span>
+          </div>
+        )}
         {tf.bukti_url && (
           <div className="px-5 py-3 border-b border-slate-100 flex justify-between items-center bg-blue-50/30">
             <span className="text-xs font-bold text-slate-600">Bukti Transfer:</span>
@@ -319,9 +406,9 @@ export default function RiwayatJajanPage() {
         )}
         <div className="p-4">
           {isSayaHutang && tf.status === 'Belum Bayar' && (
-            <div>
+            <div className="flex justify-end">
                <input type="file" accept="image/*" className="hidden" ref={el => { fileInputRefs.current[tf.id] = el; }} onChange={(e) => handleUploadBukti(e, tf.id)} />
-               <button onClick={() => fileInputRefs.current[tf.id]?.click()} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3 rounded-xl shadow-sm transition-colors touch-manipulation">📸 Upload Bukti TF</button>
+               <button onClick={() => fileInputRefs.current[tf.id]?.click()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm transition-colors touch-manipulation">📸 Upload Bukti TF</button>
             </div>
           )}
           {isSayaPiutang && tf.status === 'Menunggu Konfirmasi' && (
@@ -361,6 +448,56 @@ export default function RiwayatJajanPage() {
       </div>
     </div>
   );
+
+  const renderCompactRow = (tf: StatusTransfer, isSayaHutang: boolean) => {
+    const infoAcara = daftarSesi.find(s => s.id === tf.id_sesi);
+    return (
+      <div key={tf.id} className={`flex flex-col gap-2 p-3 rounded-xl border ${tf.status === 'Lunas' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+        <div className="flex justify-between items-start">
+           <div>
+             <div className="font-bold text-xs text-slate-800">{infoAcara?.nama || 'Acara'}</div>
+             <div className="text-[10px] text-slate-500">{infoAcara?.warung}</div>
+           </div>
+           <div className="text-right">
+             <div className="font-black text-sm text-slate-900">Rp {Math.round(tf.nominal).toLocaleString('id-ID')}</div>
+             <div className="text-[9px] font-bold mt-1">
+               {tf.status === 'Belum Bayar' && <span className="text-rose-600">BELUM BAYAR</span>}
+               {tf.status === 'Menunggu Konfirmasi' && <span className="text-amber-600 animate-pulse">MENUNGGU KONFIRMASI ⏳</span>}
+               {tf.status === 'Lunas' && <span className="text-emerald-600">LUNAS ✓</span>}
+             </div>
+           </div>
+        </div>
+        
+        {/* Actions & Bukti URL */}
+        {(tf.bukti_url || (isSayaHutang && tf.status === 'Belum Bayar') || (!isSayaHutang && tf.status !== 'Lunas')) && (
+          <div className="mt-1 pt-2 border-t border-slate-200/60 flex justify-between items-center gap-2">
+            <div>
+              {tf.bukti_url && (
+                <a href={tf.bukti_url} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-blue-600 underline">Lihat Bukti 📄</a>
+              )}
+            </div>
+            <div className="flex gap-1.5">
+              {isSayaHutang && tf.status === 'Belum Bayar' && (
+                <>
+                  <input type="file" accept="image/*" className="hidden" ref={el => { fileInputRefs.current[tf.id] = el; }} onChange={(e) => handleUploadBukti(e, tf.id)} />
+                  <button onClick={() => fileInputRefs.current[tf.id]?.click()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-md shadow-sm transition-colors touch-manipulation">Upload TF</button>
+                </>
+              )}
+              {!isSayaHutang && tf.status === 'Menunggu Konfirmasi' && (
+                <>
+                  <button onClick={() => handleUpdateStatus(tf.id, 'Belum Bayar')} className="bg-rose-100 text-rose-700 hover:bg-rose-200 font-bold text-[9px] px-2.5 py-1.5 rounded-md transition-colors touch-manipulation">Tolak</button>
+                  <button onClick={() => handleUpdateStatus(tf.id, 'Lunas')} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-md shadow-sm transition-colors touch-manipulation">Validasi Lunas</button>
+                </>
+              )}
+              {!isSayaHutang && tf.status === 'Belum Bayar' && (
+                <button onClick={() => handleUpdateStatus(tf.id, 'Lunas')} className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-md shadow-sm transition-colors touch-manipulation">Lunas Instan</button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (!currentUser) return <div className="p-12 text-center text-slate-500 font-bold animate-pulse">Menyiapkan Pusat Tagihan...</div>;
 
@@ -408,15 +545,25 @@ export default function RiwayatJajanPage() {
                       {netMap[orangTerpilih] > 0 ? 'Dapat Uang' : 'Bayar Uang'} Rp {Math.abs(Math.round(netMap[orangTerpilih] || 0)).toLocaleString('id-ID')}
                    </div>
                    <p className="text-[10px] text-slate-400 mt-1 italic">*Kalkulasi netting hanya menghitung tagihan berstatus 'Belum Bayar'.</p>
+                   
+                   <div className="mt-3 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100 inline-block">
+                     <span className="text-slate-500 font-medium">Bank Tujuan: </span>
+                     <span className={`font-bold ${profiles.find(p=>p.id===orangTerpilih)?.nama_bank ? 'text-slate-800' : 'text-rose-500 italic'}`}>
+                       {profiles.find(p=>p.id===orangTerpilih)?.nama_bank ? `${profiles.find(p=>p.id===orangTerpilih)?.nama_bank} - ${profiles.find(p=>p.id===orangTerpilih)?.no_rekening}` : 'Belum diisi'}
+                     </span>
+                   </div>
                 </div>
                 <div className="flex flex-col gap-2">
                   <button onClick={() => bagikanKeWA(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
                     📲 REKAP WA
                   </button>
                   {netMap[orangTerpilih] < 0 && (
-                    <button onClick={() => handleBatchUpdate('settle')} className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
-                      🚀 BAYAR SEMUA
-                    </button>
+                    <div>
+                      <input type="file" accept="image/*" className="hidden" id={`upload-batch-${orangTerpilih}`} onChange={handleBatchUpload} />
+                      <button onClick={() => document.getElementById(`upload-batch-${orangTerpilih}`)?.click()} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
+                        🚀 BAYAR SEMUA + UPLOAD
+                      </button>
+                    </div>
                   )}
                   {netMap[orangTerpilih] > 0 && (
                     <button onClick={() => handleBatchUpdate('approve')} className="bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-sm flex items-center justify-center gap-2">
@@ -430,37 +577,57 @@ export default function RiwayatJajanPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 
                 {/* 📉 SISI KIRI: HUTANG SAYA KE DIA */}
-                <div className="space-y-4">
-                  <h4 className="text-xs font-black text-rose-600 uppercase tracking-widest border-b border-rose-100 pb-2 flex items-center gap-1.5">
-                    📉 Hutang Saya Ke Dia ({transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih).length})
-                  </h4>
-                  <div className="space-y-4">
-                    {transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih).length === 0 ? (
-                      <div className="text-center py-8 text-slate-400 text-xs italic bg-white rounded-2xl border border-dashed border-slate-200">
+                <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="bg-rose-50 px-5 py-3 border-b border-rose-100 flex justify-between items-center">
+                    <h4 className="text-xs font-black text-rose-700 uppercase tracking-widest flex items-center gap-1.5">
+                      📉 Hutang Saya ({hutangKeOrangTerpilih.length})
+                    </h4>
+                    <span className="text-rose-700 font-black text-sm">
+                       Rp {totalHutangKeOrangTerpilih.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {hutangKeOrangTerpilih.length === 0 ? (
+                      <div className="text-center py-6 text-slate-400 text-xs italic bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                         Aman bwang, kamu ga ada hutang ke dia.
                       </div>
                     ) : (
-                      transfers.filter(tf => tf.status !== 'Lunas' && tf.dari_user_id === currentUser?.id && tf.ke_user_id === orangTerpilih).map(tf => renderKartuTagihan(tf))
+                      hutangKeOrangTerpilih.map(tf => renderCompactRow(tf, true))
                     )}
                   </div>
                 </div>
 
                 {/* 📈 SISI KANAN: PIUTANG SAYA KE DIA */}
-                <div className="space-y-4">
-                  <h4 className="text-xs font-black text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2 flex items-center gap-1.5">
-                    📈 Piutang Saya Ke Dia ({transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih).length})
-                  </h4>
-                  <div className="space-y-4">
-                    {transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih).length === 0 ? (
-                      <div className="text-center py-8 text-slate-400 text-xs italic bg-white rounded-2xl border border-dashed border-slate-200">
+                <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="bg-emerald-50 px-5 py-3 border-b border-emerald-100 flex justify-between items-center">
+                    <h4 className="text-xs font-black text-emerald-700 uppercase tracking-widest flex items-center gap-1.5">
+                      📈 Piutang Saya ({piutangKeOrangTerpilih.length})
+                    </h4>
+                    <span className="text-emerald-700 font-black text-sm">
+                       Rp {totalPiutangKeOrangTerpilih.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {piutangKeOrangTerpilih.length === 0 ? (
+                      <div className="text-center py-6 text-slate-400 text-xs italic bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                         Ga ada tagihan aktif ke dia saat ini.
                       </div>
                     ) : (
-                      transfers.filter(tf => tf.status !== 'Lunas' && tf.ke_user_id === currentUser?.id && tf.dari_user_id === orangTerpilih).map(tf => renderKartuTagihan(tf))
+                      piutangKeOrangTerpilih.map(tf => renderCompactRow(tf, false))
                     )}
                   </div>
                 </div>
 
+              </div>
+
+              {/* 🏦 FOOTER BANK INFO */}
+              <div className="mt-6 bg-slate-50 p-4 rounded-2xl border border-slate-200 flex justify-center items-center">
+                 <div className="text-xs">
+                   <span className="text-slate-500 font-medium">Bank Tujuan Pembayaran: </span>
+                   <span className={`font-bold ${profiles.find(p=>p.id===orangTerpilih)?.nama_bank ? 'text-slate-800' : 'text-rose-500 italic'}`}>
+                     {profiles.find(p=>p.id===orangTerpilih)?.nama_bank ? `${profiles.find(p=>p.id===orangTerpilih)?.nama_bank} - ${profiles.find(p=>p.id===orangTerpilih)?.no_rekening}` : 'Belum diisi'}
+                   </span>
+                 </div>
               </div>
             </div>
           ) : viewMode === 'event' && sesiTerpilih ? (
