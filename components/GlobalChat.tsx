@@ -233,21 +233,23 @@ export default function GlobalChat({ profile }: { profile: Profile | null }) {
         {onlineUsers.map(user => (
           <div
             key={user.id}
-            className="absolute left-0 top-0 will-change-transform"
-            style={{
-              animation: `bounceX ${user.durationX} linear infinite alternate`,
-              animationDelay: user.delayX,
-              // Start slightly lower in the screen
-              transform: 'translateY(80vh)', 
-            }}
+            className="absolute left-0"
+            style={{ top: '85vh' }}
           >
             <div
-              className="will-change-transform shadow-lg rounded-full border-2 border-white/50 backdrop-blur-sm"
+              className="will-change-transform"
               style={{
-                animation: `bounceY ${user.durationY} ease-in-out infinite alternate`,
-                animationDelay: user.delayY,
+                animation: `bounceX ${user.durationX} linear infinite alternate`,
+                animationDelay: user.delayX,
               }}
             >
+              <div
+                className="will-change-transform shadow-lg rounded-full border-2 border-white/50 backdrop-blur-sm relative"
+                style={{
+                  animation: `bounceY ${user.durationY} ease-in-out infinite alternate`,
+                  animationDelay: user.delayY,
+                }}
+              >
               {user.avatar_url ? (
                 <img src={user.avatar_url} alt={user.nama} className="w-10 h-10 rounded-full object-cover" />
               ) : (
@@ -257,6 +259,7 @@ export default function GlobalChat({ profile }: { profile: Profile | null }) {
               )}
               {/* Online Indicator Dot */}
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full animate-pulse"></div>
+            </div>
             </div>
           </div>
         ))}
