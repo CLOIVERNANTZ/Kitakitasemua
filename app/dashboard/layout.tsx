@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/utils/supabase';
+import GlobalChat from '@/components/GlobalChat';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -206,10 +207,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* USER PROFILE MOVED TO TOP */}
           {profile && (
             <div className="px-4 py-4 border-b border-slate-100 bg-slate-50/30">
-              <div className="flex items-center gap-3 p-2.5 bg-white rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
+              <div 
+                className="flex items-center gap-3 p-2.5 bg-white rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md cursor-pointer"
+                onClick={() => {
+                  router.push('/dashboard/profile');
+                  setIsMobileMenuOpen(false);
+                }}
+              >
                 <div
                   className="relative w-10 h-10 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center font-black text-blue-700 cursor-pointer overflow-hidden group flex-shrink-0 shadow-sm transition-all hover:border-blue-400"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={(e) => {
+                    e.stopPropagation(); // Biar ngga redirect ke profile kalau cuma klik ganti foto
+                    fileInputRef.current?.click();
+                  }}
                   title="Klik untuk ganti foto profil"
                 >
                   {isUploading ? (
@@ -280,9 +290,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div>
               <p className="px-3 text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">KitaKitaSemua</p>
               <div className="space-y-0.5">
-                <Link href="/dashboard/profile" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/profile') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
-                  👤 Profil
-                </Link>
                 <Link href="/dashboard/gallery" className={`flex items-center gap-2.5 px-3 py-2 rounded-xl font-bold text-xs transition-all ${isActive('/dashboard/gallery') ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                   📸 Galeri
                 </Link>
@@ -318,6 +325,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <main className="flex-1 h-full overflow-y-auto relative z-10 pt-16 md:pt-0 bg-slate-50 w-full">
         {children}
       </main>
+
+      {/* ✅ GLOBAL CHAT & ONLINE PRESENCE */}
+      <GlobalChat profile={profile} />
     </div>
   );
 }

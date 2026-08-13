@@ -312,7 +312,7 @@ export default function RiwayatJajanPage() {
   const totalHutangKeOrangTerpilih = hutangKeOrangTerpilih.reduce((acc, tf) => acc + tf.nominal, 0);
   const totalPiutangKeOrangTerpilih = piutangKeOrangTerpilih.reduce((acc, tf) => acc + tf.nominal, 0);
 
-  // ✅ WA MESSAGE UNTUK NETTING
+  // ✅ WA MESSAGE UNTUK NETTING & GLOBAL CHAT
   const bagikanKeWA = (isNetting = false) => {
     let teks = "";
     if (isNetting && orangTerpilih) {
@@ -321,8 +321,8 @@ export default function RiwayatJajanPage() {
       const saldo = netMap[orangTerpilih] || 0;
       const absSaldo = Math.abs(Math.round(saldo));
       
-      teks = `📢 *REKAP SETTLEMENT: ${target?.nama}* 📢\n\n`;
-      teks += `Halo ${target?.nama}, ini rekap saldo plus-minus kita dari semua acara ya:\n\n`;
+      teks = `@${namaTarget} 📢 *REKAP SETTLEMENT* 📢\n\n`;
+      teks += `Halo ${namaTarget}, ini rekap saldo plus-minus kita dari semua acara ya:\n\n`;
       
       if (saldo > 0) {
         teks += `*Status:* Kamu ada kurang ke aku sebesar:\n💰 *Rp ${absSaldo.toLocaleString('id-ID')}*\n\n`;
@@ -340,13 +340,23 @@ export default function RiwayatJajanPage() {
       if (piutangSaya.length > 0) {
         teks += `Halo gengs! Mohon kerjasamanya untuk pelunasan ya 🙏\n\n*STATUS:* \n`;
         piutangSaya.forEach(tf => {
-          const pengirim = profiles.find(p => p.id === tf.dari_user_id)?.nama;
-          teks += `- ${pengirim}: ${tf.status === 'Lunas' ? '✅ LUNAS' : `❌ Rp ${Math.round(tf.nominal).toLocaleString('id-ID')}`}\n`;
+          const pengirim = profiles.find(p => p.id === tf.dari_user_id)?.nama || 'Unknown';
+          teks += `- @${pengirim}: ${tf.status === 'Lunas' ? '✅ LUNAS' : `❌ Rp ${Math.round(tf.nominal).toLocaleString('id-ID')}`}\n`;
         });
         const my = profiles.find(p => p.id === currentUser?.id);
         teks += `\n💳 *Bank:* ${my?.nama_bank || 'TBD'} - ${my?.no_rekening || ''}\n`;
       }
     }
+
+    // 1. Tembak langsung ke Global Chat agar bisa dilihat di layar
+    if (currentUser?.id) {
+      supabase.from('chat_messages').insert({
+        user_id: currentUser.id,
+        message: teks
+      }).then();
+    }
+
+    // 2. Buka WhatsApp untuk di-forward/dikirim secara manual jika perlu
     window.open(`https://wa.me/?text=${encodeURIComponent(teks)}`, '_blank');
   };
 
