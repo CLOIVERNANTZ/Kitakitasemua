@@ -101,7 +101,7 @@ export default function LoginPage() {
         setError('Password yang Anda masukkan salah.');
         setLoading(false);
       } else {
-        router.push('/');
+        router.push('/dashboard');
       }
 
       // 2. LOGIKA MODE: REGISTER
