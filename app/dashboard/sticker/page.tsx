@@ -20,6 +20,8 @@ export default function StickerMakerPage() {
   const [textSize, setTextSize] = useState<number>(48);
   const [textPosition, setTextPosition] = useState<'atas' | 'tengah' | 'bawah'>('bawah');
   
+  const [quality, setQuality] = useState<'rendah' | 'sedang' | 'tinggi'>('sedang');
+  const [speed, setSpeed] = useState<1 | 1.5 | 2>(1);
   const [bgMode, setBgMode] = useState<'transparan' | 'blur' | 'hitam' | 'putih'>('blur');
   
   const [stickerFile, setStickerFile] = useState<File | null>(null);
@@ -30,7 +32,10 @@ export default function StickerMakerPage() {
 
   useEffect(() => {
     const load = async () => {
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      // Deteksi apakah Turbo Mode (SharedArrayBuffer) aktif di browser
+      const isTurbo = typeof SharedArrayBuffer !== 'undefined';
+      const coreName = isTurbo ? 'core-mt' : 'core';
+      const baseURL = `https://unpkg.com/@ffmpeg/${coreName}@0.12.6/dist/umd`;
       const ffmpeg = ffmpegRef.current;
       
       ffmpeg.on('log', ({ message }) => {
@@ -41,12 +46,18 @@ export default function StickerMakerPage() {
       ffmpeg.on('progress', ({ progress }) => {
         setProgress(Math.round(progress * 100));
       });
-
-      // Load ffmpeg core
-      await ffmpeg.load({
+      
+      const loadParams: any = {
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
+      };
+      
+      if (isTurbo) {
+        loadParams.workerURL = await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript');
+      }
+
+      // Load ffmpeg core
+      await ffmpeg.load(loadParams);
 
       // Load Font for drawtext
       try {
@@ -104,9 +115,14 @@ export default function StickerMakerPage() {
       if (startTime !== '') {
         inputArgs.push('-ss', startTime.toString());
       }
+      
       if (endTime !== '') {
         inputArgs.push('-to', endTime.toString());
+      } else {
+        // Auto-trim 6 seconds if not specified
+        inputArgs.push('-t', '6');
       }
+      
       inputArgs.push('-i', 'input.mp4');
       
       if (stickerFile) {
@@ -136,11 +152,19 @@ export default function StickerMakerPage() {
       let complexFilter = '';
       
       const buildBaseFilter = (size: number) => {
+        let setptsFilter = '';
+        if (speed === 1.5) setptsFilter = 'setpts=0.666667*PTS,';
+        if (speed === 2) setptsFilter = 'setpts=0.5*PTS,';
+
+        let targetFps = 10;
+        if (quality === 'rendah') targetFps = 8;
+        if (quality === 'tinggi') targetFps = 15;
+
         if (bgMode === 'blur') {
-          return `[0:v]fps=10,split[v0][v1];[v0]scale=${size}:${size}:force_original_aspect_ratio=increase,crop=${size}:${size},boxblur=20:5[bg];[v1]scale=${size}:${size}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[vbase];`;
+          return `[0:v]${setptsFilter}fps=${targetFps},split[v0][v1];[v0]scale=${size}:${size}:force_original_aspect_ratio=increase,crop=${size}:${size},boxblur=20:5[bg];[v1]scale=${size}:${size}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[vbase];`;
         } else {
           const color = bgMode === 'hitam' ? 'black' : bgMode === 'putih' ? 'white' : 'white@0.0';
-          return `[0:v]fps=10,scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=${color}[vbase];`;
+          return `[0:v]${setptsFilter}fps=${targetFps},scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=${color}[vbase];`;
         }
       };
       
@@ -194,6 +218,10 @@ export default function StickerMakerPage() {
            complexFilter = filterParts.replace(/;$/, '') + '[out]';
         }
 
+        let qValue = '30';
+        if (quality === 'rendah') qValue = '20';
+        if (quality === 'tinggi') qValue = '40';
+
         await ffmpeg.exec([
           ...inputArgs,
           '-vcodec', 'libwebp',
@@ -201,7 +229,7 @@ export default function StickerMakerPage() {
           '-map', '[out]',
           '-lossless', '0',
           '-compression_level', '6',
-          '-q:v', '30',
+          '-q:v', qValue,
           '-loop', '0',
           '-preset', 'picture',
           '-an',
@@ -280,6 +308,38 @@ export default function StickerMakerPage() {
                           className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl focus:ring-amber-500 p-2.5"
                           placeholder="Bebas"
                         />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* KUALITAS DAN KECEPATAN */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-slate-700">⚙️ Kualitas</label>
+                      <div className="flex bg-slate-200 p-1 rounded-xl">
+                        {(['rendah', 'sedang', 'tinggi'] as const).map((q) => (
+                          <button
+                            key={q}
+                            onClick={() => setQuality(q)}
+                            className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-colors capitalize ${quality === q ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-slate-700">⏩ Percepat</label>
+                      <div className="flex bg-slate-200 p-1 rounded-xl">
+                        {([1, 1.5, 2] as const).map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => setSpeed(s)}
+                            className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-colors ${speed === s ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                            {s}x
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
