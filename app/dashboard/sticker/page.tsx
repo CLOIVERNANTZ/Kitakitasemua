@@ -13,12 +13,14 @@ export default function StickerMakerPage() {
   const [outputType, setOutputType] = useState<'GIF' | 'WebP' | null>(null);
   
   // New States
-  const [startTime, setStartTime] = useState<number | ''>('');
-  const [endTime, setEndTime] = useState<number | ''>('');
+  const [startTime, setStartTime] = useState<string>('');
+  const [endTime, setEndTime] = useState<string>('');
   
   const [customText, setCustomText] = useState("");
   const [textSize, setTextSize] = useState<number>(48);
   const [textPosition, setTextPosition] = useState<'atas' | 'tengah' | 'bawah'>('bawah');
+  
+  const [bgMode, setBgMode] = useState<'transparan' | 'blur' | 'hitam' | 'putih'>('blur');
   
   const [stickerFile, setStickerFile] = useState<File | null>(null);
   const [stickerPosition, setStickerPosition] = useState<'tl' | 'tr' | 'bl' | 'br'>('tr');
@@ -133,9 +135,17 @@ export default function StickerMakerPage() {
 
       let complexFilter = '';
       
+      const buildBaseFilter = (size: number) => {
+        if (bgMode === 'blur') {
+          return `[0:v]fps=10,split[v0][v1];[v0]scale=${size}:${size}:force_original_aspect_ratio=increase,crop=${size}:${size},boxblur=20:5[bg];[v1]scale=${size}:${size}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[vbase];`;
+        } else {
+          const color = bgMode === 'hitam' ? 'black' : bgMode === 'putih' ? 'white' : 'white@0.0';
+          return `[0:v]fps=10,scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=${color}[vbase];`;
+        }
+      };
+      
       if (type === 'GIF') {
-        // Base scaling for GIF
-        let filterParts = `[0:v]fps=10,scale=320:-1:flags=lanczos[vbase];`;
+        let filterParts = buildBaseFilter(320);
         let lastOutput = '[vbase]';
 
         if (stickerFile) {
@@ -148,7 +158,6 @@ export default function StickerMakerPage() {
           lastOutput = '[vtext]';
         }
 
-        // Add palette generation and use for GIF
         filterParts += `${lastOutput}split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse[out]`;
         complexFilter = filterParts;
 
@@ -165,8 +174,7 @@ export default function StickerMakerPage() {
         setOutputUrl(url);
 
       } else if (type === 'WebP') {
-        // Base scaling for WhatsApp WebP (pad to exactly 512x512)
-        let filterParts = `[0:v]fps=10,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0.0[vbase];`;
+        let filterParts = buildBaseFilter(512);
         let lastOutput = '[vbase]';
 
         if (stickerFile) {
@@ -179,7 +187,6 @@ export default function StickerMakerPage() {
           lastOutput = '[vtext]';
         }
         
-        // Remove trailing semicolon if no split is added
         complexFilter = filterParts;
         if (complexFilter.endsWith(';')) {
            complexFilter += `${lastOutput}copy[out]`;
@@ -255,8 +262,9 @@ export default function StickerMakerPage() {
                         <input 
                           type="number" 
                           min="0"
+                          step="0.1"
                           value={startTime}
-                          onChange={(e) => setStartTime(e.target.value === '' ? '' : Number(e.target.value))}
+                          onChange={(e) => setStartTime(e.target.value)}
                           className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl focus:ring-amber-500 p-2.5"
                           placeholder="0"
                         />
@@ -266,12 +274,29 @@ export default function StickerMakerPage() {
                         <input 
                           type="number" 
                           min="0"
+                          step="0.1"
                           value={endTime}
-                          onChange={(e) => setEndTime(e.target.value === '' ? '' : Number(e.target.value))}
+                          onChange={(e) => setEndTime(e.target.value)}
                           className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl focus:ring-amber-500 p-2.5"
                           placeholder="Bebas"
                         />
                       </div>
+                    </div>
+                  </div>
+
+                  {/* LATAR BELAKANG */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-bold text-slate-700">🎨 Latar Belakang (Untuk video vertikal)</label>
+                    <div className="flex gap-2">
+                      {(['blur', 'transparan', 'hitam', 'putih'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => setBgMode(mode)}
+                          className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors capitalize ${bgMode === mode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
