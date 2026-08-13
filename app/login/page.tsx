@@ -61,7 +61,10 @@ export default function LoginPage() {
   const [showDungeon, setShowDungeon] = useState(false);
 
   const formatPhoneNumber = (num: string) => {
-    return num.startsWith('0') ? '+62' + num.substring(1) : num;
+    let clean = num.replace(/\D/g, ''); // Hapus semua karakter non-angka
+    if (clean.startsWith('62')) clean = clean.substring(2);
+    else if (clean.startsWith('0')) clean = clean.substring(1);
+    return '+62' + clean;
   };
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -256,7 +259,7 @@ export default function LoginPage() {
                   required={mode === 'login' || mode === 'register'} // 👈 Menggunakan kondisi positif yang aman dari error linting
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-slate-900 text-sm"
                   placeholder="81234567890"
-                  value={phone.replace('+62', '')}
+                  value={phone.replace(/\D/g, '').replace(/^(62|0)/, '')}
                   onChange={(e) => setPhone(e.target.value)}
                 />
               </div>
