@@ -35,6 +35,13 @@ body {
   100% { transform: translateY(-30vh); }
 }
 
+@media (max-width: 768px) {
+  @keyframes bounceY {
+    0% { transform: translateY(-5vh); }
+    100% { transform: translateY(-20vh); }
+  }
+}
+
 /* Custom Scrollbar for Chat */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;

@@ -1,14 +1,13 @@
 'use client';
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '@/utils/supabase'; // ✅ Pakai util Supabase
-import CustomModal from '@/components/CustomModal'; // ✅ Import Custom Modal
+import { supabase } from '@/utils/supabase';
+import CustomModal from '@/components/CustomModal';
 
 interface Anggota { id: string; nama: string; }
 interface RincianBiaya { id: string; item: string; harga: number; }
 type ModeSplit = 'bagi_rata' | 'manual';
 
-// Interface Partisipan agar tidak pakai 'any'
 interface PartisipanState {
   id: string;
   nama: string;
@@ -16,6 +15,8 @@ interface PartisipanState {
   isGratis: boolean;
   nominalManual: number;
   isTamu?: boolean;
+  rincianBiaya: RincianBiaya[];
+  isExpanded?: boolean;
 }
 
 function NginapKuyContent() {
@@ -33,19 +34,12 @@ function NginapKuyContent() {
   const [tanggal, setTanggal] = useState(new Date().toISOString().split('T')[0]);
   const [pahlawanId, setPahlawanId] = useState<string>('');
   
-  const [rincianBiaya, setRincianBiaya] = useState<RincianBiaya[]>([]);
-  const [inputItem, setInputItem] = useState('');
-  const [inputHarga, setInputHarga] = useState('');
   const [isOcrLoading, setIsOcrLoading] = useState(false);
-  const totalBiaya = rincianBiaya.reduce((sum, r) => sum + r.harga, 0);
-
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [selectedToAdd, setSelectedToAdd] = useState('');
   
   const [partisipan, setPartisipan] = useState<PartisipanState[]>([]);
   const [modeSplit, setModeSplit] = useState<ModeSplit>('bagi_rata');
 
-  // ✅ STATE UNTUK CUSTOM MODAL
   const [modal, setModal] = useState({
     isOpen: false,
     type: 'success' as 'success' | 'error' | 'warning' | 'loading',
@@ -56,14 +50,12 @@ function NginapKuyContent() {
   });
   const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
 
+  // Helper Total Biaya
+  const partisipanIkut = partisipan.filter(p => p.ikut);
+  const totalBiaya = partisipanIkut.reduce((sum, p) => sum + p.rincianBiaya.reduce((s, r) => s + r.harga, 0), 0);
+
   useEffect(() => {
     fetchUsers();
-    
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsDropdownOpen(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const fetchUsers = async () => {
@@ -72,19 +64,14 @@ function NginapKuyContent() {
     setCurrentUser(user);
 
     const { data: profiles } = await supabase.from('profiles').select('id, nama');
-    
-    // 🌟 AMBIL DATA TAMU YANG PERNAH DI-ADD DI FITUR MANAPUN VIA TABEL MASTER TAGIHAN_TAMU
     const { data: historiTamu } = await supabase.from('tagihan_tamu').select('nama_tamu');
     const tamuUnik = historiTamu ? Array.from(new Set(historiTamu.map(t => t.nama_tamu))) : [];
 
     if (profiles) {
       setAnggota(profiles);
       
-      // Susun list anggota resmi
-      const listMember = profiles.map(a => ({ id: a.id, nama: a.nama, ikut: true, isGratis: false, nominalManual: 0, isTamu: false }));
-      
-      // Susun list tamu dari riwayat masa lalu (default ikut: false agar tidak langsung terpilih otomatis)
-      const listTamu = tamuUnik.map(nama => ({ id: nama, nama: `👤 ${nama} (Tamu)`, ikut: false, isGratis: false, nominalManual: 0, isTamu: true }));
+      const listMember: PartisipanState[] = profiles.map(a => ({ id: a.id, nama: a.nama, ikut: false, isGratis: false, nominalManual: 0, rincianBiaya: [], isTamu: false }));
+      const listTamu: PartisipanState[] = tamuUnik.map(nama => ({ id: nama, nama: `👤 ${nama} (Tamu)`, ikut: false, isGratis: false, nominalManual: 0, rincianBiaya: [], isTamu: true }));
       
       let finalPartisipan = [...listMember, ...listTamu];
 
@@ -94,19 +81,14 @@ function NginapKuyContent() {
              setNamaProyek(eventData.nama_acara);
              setTanggal(eventData.tanggal);
              setPahlawanId(eventData.pahlawan_ids?.[0] || '');
-             if (eventData.data_ekstra) {
-                 setRincianBiaya(eventData.data_ekstra.rincian || []);
-             }
-             const partisipanDB = eventData.partisipan_ids || [];
              
-             // Cek tamu yang ikut di sesi nginap khusus ID ini
+             const partisipanDB = eventData.partisipan_ids || [];
              const { data: tagihanTamuEvent } = await supabase.from('tagihan_tamu').select('nama_tamu').eq('event_id', viewId);
              const tamuSesiIni = tagihanTamuEvent ? tagihanTamuEvent.map(t => t.nama_tamu) : [];
 
-             // Pastikan tamu sesi ini masuk list
              tamuSesiIni.forEach(nama => {
                if (!finalPartisipan.some(p => p.id === nama)) {
-                 finalPartisipan.push({ id: nama, nama: `👤 ${nama} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, isTamu: true });
+                 finalPartisipan.push({ id: nama, nama: `👤 ${nama} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, rincianBiaya: [], isTamu: true });
                }
              });
 
@@ -114,24 +96,48 @@ function NginapKuyContent() {
                const isIkut = p.isTamu ? tamuSesiIni.includes(p.id) : partisipanDB.includes(p.id);
                return { ...p, ikut: isIkut };
              });
+
+             // Migrasi data lama jika ada rincian global
+             if (eventData.data_ekstra?.rincian && eventData.data_ekstra.rincian.length > 0) {
+               const pahlawan = finalPartisipan.find(p => p.id === (eventData.pahlawan_ids?.[0] || user.id));
+               if (pahlawan) {
+                 pahlawan.rincianBiaya = eventData.data_ekstra.rincian;
+               }
+             }
+
+             // Migrasi data baru (per orang)
+             if (eventData.data_ekstra?.rincianPerOrang) {
+                Object.keys(eventData.data_ekstra.rincianPerOrang).forEach(pid => {
+                  const p = finalPartisipan.find(x => x.id === pid);
+                  if (p) p.rincianBiaya = eventData.data_ekstra.rincianPerOrang[pid];
+                });
+             }
          }
+      } else {
+         // Default if creating new: Include Creator
+         finalPartisipan = finalPartisipan.map(p => p.id === user.id ? { ...p, ikut: true } : p);
+         setPahlawanId(user.id);
       }
 
       setPartisipan(finalPartisipan);
-      setPahlawanId(user.id);
     }
     setIsLoading(false);
   };
 
-  const handleTambahRincian = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isViewMode || !inputItem || !inputHarga) return;
-    const hargaNum = Number(inputHarga.replace(/\D/g, ''));
-    setRincianBiaya([...rincianBiaya, { id: 'item_' + Date.now(), item: inputItem, harga: hargaNum }]);
-    setInputItem(''); setInputHarga('');
+  const handleAddPartisipan = () => {
+    if (!selectedToAdd) return;
+    setPartisipan(prev => {
+      const existing = prev.find(p => p.id === selectedToAdd);
+      if (existing) {
+        return prev.map(p => p.id === selectedToAdd ? { ...p, ikut: true } : p);
+      } else {
+        // Tamu baru
+        return [...prev, { id: selectedToAdd, nama: `👤 ${selectedToAdd} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, rincianBiaya: [], isTamu: true }];
+      }
+    });
+    setSelectedToAdd('');
   };
 
-  // UTILITY KOMPRESI GAMBAR UNTUK MENGATASI LIMIT 1MB OCR.SPACE
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -143,26 +149,16 @@ function NginapKuyContent() {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          
           const MAX_DIM = 1200;
           if (width > height) {
-            if (width > MAX_DIM) {
-              height = Math.round((height *= MAX_DIM / width));
-              width = MAX_DIM;
-            }
+            if (width > MAX_DIM) { height = Math.round((height *= MAX_DIM / width)); width = MAX_DIM; }
           } else {
-            if (height > MAX_DIM) {
-              width = Math.round((width *= MAX_DIM / height));
-              height = MAX_DIM;
-            }
+            if (height > MAX_DIM) { width = Math.round((width *= MAX_DIM / height)); height = MAX_DIM; }
           }
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = width; canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-          
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-          resolve(compressedBase64);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
         };
         img.onerror = (err) => reject(err);
       };
@@ -170,8 +166,7 @@ function NginapKuyContent() {
     });
   };
 
-  // ✅ LOGIKA SCAN STRUK DAN COMBINE BIAYA
-  const handleOcrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleOcrUpload = async (e: React.ChangeEvent<HTMLInputElement>, participantId: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -180,46 +175,39 @@ function NginapKuyContent() {
 
     try {
       const base64Result = await compressImage(file);
-      
       setModal(prev => ({ ...prev, isOpen: true, type: 'loading', title: 'Membaca Struk...', message: 'Google AI sedang memindai baris teks bill Anda...', onCancel: undefined }));
         
-        // Tembak API Route internal kita
-        const res = await fetch('/api/ocr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: base64Result })
-        });
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Result })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
 
-        const data = await res.json();
-
-        if (data.error) {
-          throw new Error(data.error);
-        }
-
-        if (data.items && data.items.length > 0) {
-          // 🌟 KUNCI LOGIKA: Gabungkan data lama (manual) dengan data baru hasil OCR Google
-          setRincianBiaya(prev => [...prev, ...data.items]);
-          
-          setModal(prev => ({
-            ...prev, isOpen: true, type: 'success', title: 'Scan Berhasil!', 
-            message: `Berhasil mendeteksi & menambahkan ${data.items.length} item pengeluaran baru dari struk!`,
-            onConfirm: closeModal
-          }));
-        } else {
-          setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Jelas', message: 'Tidak menemukan format nama item & harga yang cocok. Silakan input manual atau coba foto lebih dekat.', onConfirm: closeModal }));
-        }
-      } catch (err: any) {
-        setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Scan', message: err.message || 'Terjadi kegagalan koneksi sistem OCR.', onConfirm: closeModal }));
-      } finally {
-        setIsOcrLoading(false);
+      if (data.items && data.items.length > 0) {
+        setPartisipan(prev => prev.map(p => p.id === participantId ? { ...p, rincianBiaya: [...p.rincianBiaya, ...data.items] } : p));
+        setModal(prev => ({
+          ...prev, isOpen: true, type: 'success', title: 'Scan Berhasil!', 
+          message: `Berhasil mendeteksi & menambahkan ${data.items.length} item pengeluaran ke ${partisipan.find(x => x.id === participantId)?.nama}!`,
+          onConfirm: closeModal
+        }));
+      } else {
+        setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Jelas', message: 'Tidak menemukan format nama item & harga yang cocok.', onConfirm: closeModal }));
       }
+    } catch (err: any) {
+      setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Scan', message: err.message || 'Terjadi kegagalan koneksi sistem OCR.', onConfirm: closeModal }));
+    } finally {
+      setIsOcrLoading(false);
+      e.target.value = ''; // reset file input
+    }
   };
 
-  const handleUbahPartisipan = (id: string, field: 'ikut' | 'isGratis', value: boolean) => {
-    if (isViewMode) return;
+  const handleUbahPartisipan = (id: string, field: 'ikut' | 'isGratis' | 'isExpanded' | 'nominalManual', value: any) => {
+    if (isViewMode && field !== 'isExpanded') return;
     setPartisipan(prev => prev.map(p => {
       if (p.id === id) {
-        if (field === 'ikut' && !value) return { ...p, ikut: false, isGratis: false, nominalManual: 0 };
+        if (field === 'ikut' && !value) return { ...p, ikut: false, isGratis: false, nominalManual: 0, rincianBiaya: [] };
         if (field === 'isGratis' && value) return { ...p, ikut: true, isGratis: true, nominalManual: 0 };
         return { ...p, [field]: value };
       }
@@ -229,42 +217,45 @@ function NginapKuyContent() {
 
   const hitungSimulasi = () => {
     let hasil: Record<string, number> = {};
-    const partisipanIkut = partisipan.filter(p => p.ikut);
-
     if (modeSplit === 'bagi_rata') {
       const yangBayar = partisipanIkut.filter(p => !p.isGratis);
       const perOrang = yangBayar.length > 0 ? totalBiaya / yangBayar.length : 0;
-      partisipanIkut.forEach(p => { hasil[p.id] = p.isGratis ? 0 : perOrang; });
+      partisipanIkut.forEach(p => { 
+        const beban = p.isGratis ? 0 : perOrang;
+        const sudahKeluar = p.rincianBiaya.reduce((s, r) => s + r.harga, 0);
+        hasil[p.id] = beban - sudahKeluar; 
+      });
     } else {
-      partisipanIkut.forEach(p => { hasil[p.id] = p.nominalManual; });
+      partisipanIkut.forEach(p => { 
+        const sudahKeluar = p.rincianBiaya.reduce((s, r) => s + r.harga, 0);
+        hasil[p.id] = p.nominalManual - sudahKeluar; 
+      });
     }
     return hasil;
   };
 
   const hasilSimulasi = hitungSimulasi();
-  const partisipanIkut = partisipan.filter(p => p.ikut);
-  const totalSimulasi = partisipanIkut.reduce((sum, p) => sum + (hasilSimulasi[p.id] || 0), 0);
+  const totalSimulasi = partisipanIkut.reduce((sum, p) => sum + (p.isGratis ? 0 : (modeSplit === 'bagi_rata' ? (partisipanIkut.filter(x=>!x.isGratis).length > 0 ? totalBiaya / partisipanIkut.filter(x=>!x.isGratis).length : 0) : p.nominalManual)), 0);
   const selisihManual = totalBiaya - totalSimulasi;
 
-  // ✅ LOGIKA BUAT TAGIHAN MENGGUNAKAN CUSTOM MODAL (SUDAH AMAN DARI TYPESCRIPT)
   const handleBuatTagihan = () => {
-    if (rincianBiaya.length === 0) {
-      return setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Oops!', message: 'Masukkan minimal 1 rincian biaya pengeluaran!', onConfirm: closeModal, onCancel: undefined }));
+    if (totalBiaya === 0) {
+      return setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Oops!', message: 'Masukkan minimal 1 rincian biaya pengeluaran di salah satu partisipan!', onConfirm: closeModal, onCancel: undefined }));
     }
-    if (modeSplit === 'manual' && selisihManual !== 0) {
+    if (modeSplit === 'manual' && Math.round(selisihManual) !== 0) {
       return setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Selisih Ditemukan!', message: 'Total pembagian manual tidak sama dengan Total Biaya Proyek!', onConfirm: closeModal, onCancel: undefined }));
     }
     
     setModal(prev => ({
-      ...prev,
-      isOpen: true,
-      type: 'warning',
-      title: 'Sebar Tagihan?',
+      ...prev, isOpen: true, type: 'warning', title: 'Sebar Tagihan?',
       message: 'Anda yakin ingin menutup proyek ini dan menyebar tagihan ke teman-teman?',
       onCancel: closeModal,
       onConfirm: async () => {
         setModal(p => ({ ...p, isOpen: true, type: 'loading', title: 'Memproses...', message: 'Merekam ke database...', onCancel: undefined }));
         
+        const rincianPerOrang: Record<string, RincianBiaya[]> = {};
+        partisipanIkut.forEach(p => { if (p.rincianBiaya.length > 0) rincianPerOrang[p.id] = p.rincianBiaya; });
+
         const idSesi = 'proyek-' + Date.now();
         const { error: eventError } = await supabase.from('events').insert({
           id: idSesi,
@@ -275,7 +266,7 @@ function NginapKuyContent() {
           total_biaya: totalBiaya,
           pahlawan_ids: [pahlawanId],
           partisipan_ids: partisipanIkut.map(p => p.id),
-          data_ekstra: { rincian: rincianBiaya }
+          data_ekstra: { rincianPerOrang }
         });
 
         if (eventError) {
@@ -284,54 +275,39 @@ function NginapKuyContent() {
 
         const newTransfers: any[] = [];
         const newTamuTransfers: any[] = [];
+        
         partisipanIkut.forEach(p => {
-          const hutang = hasilSimulasi[p.id];
-          if (hutang > 0 && p.id !== pahlawanId) {
-            if (p.isTamu) {
-              // 👻 JIKA DIA TAMU, KIRIM KE ARRAY KHUSUS TAMU
-              newTamuTransfers.push({
-                event_id: idSesi,
-                nama_tamu: p.id,
-                ke_user_id: pahlawanId,
-                nominal: hutang,
-                status: 'Belum Bayar'
-              });
+          const hutang = Math.round(hasilSimulasi[p.id]);
+          if (p.id !== pahlawanId && hutang !== 0) {
+            const payload = {
+              event_id: idSesi,
+              nominal: Math.abs(hutang),
+              status: 'Belum Bayar'
+            };
+            if (hutang > 0) {
+              // p owes pahlawan
+              if (p.isTamu) newTamuTransfers.push({ ...payload, nama_tamu: p.id, ke_user_id: pahlawanId });
+              else newTransfers.push({ ...payload, dari_user_id: p.id, ke_user_id: pahlawanId });
             } else {
-              // 👤 JIKA MEMBER RESMI, MASUKKAN SEPERTI BIASA
-              newTransfers.push({
-                id: `tf_${p.id}_to_${pahlawanId}_${idSesi}`,
-                event_id: idSesi,
-                dari_user_id: p.id,
-                ke_user_id: pahlawanId,
-                nominal: hutang,
-                status: 'Belum Bayar'
-              });
+              // pahlawan owes p
+              if (p.isTamu) newTamuTransfers.push({ ...payload, dari_user_id: pahlawanId, nama_tamu: p.id });
+              else newTransfers.push({ ...payload, dari_user_id: pahlawanId, ke_user_id: p.id });
             }
           }
         });
 
-        // Eksekusi insert ke tabel masing-masing
         if (newTransfers.length > 0) {
-          const { error: tfError } = await supabase.from('tagihan').insert(newTransfers);
-          if (tfError) {
-            return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: tfError.message, onConfirm: closeModal, onCancel: undefined }));
-          }
+          const { error: tfError } = await supabase.from('tagihan').insert(newTransfers.map(t => ({...t, id: `tf_${Date.now()}_${Math.random()}` })));
+          if (tfError) return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: tfError.message, onConfirm: closeModal, onCancel: undefined }));
         }
-
         if (newTamuTransfers.length > 0) {
           const { error: tamuError } = await supabase.from('tagihan_tamu').insert(newTamuTransfers);
-          if (tamuError) {
-            return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal Menyimpan Tamu', message: tamuError.message, onConfirm: closeModal, onCancel: undefined }));
-          }
+          if (tamuError) return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: tamuError.message, onConfirm: closeModal, onCancel: undefined }));
         }
 
         setModal(p => ({ 
           ...p, isOpen: true, type: 'success', title: 'Berhasil!', message: 'Tagihan resmi disebar ke teman-teman.', 
-          onCancel: undefined,
-          onConfirm: () => {
-            closeModal();
-            router.push('/dashboard/riwayat');
-          } 
+          onCancel: undefined, onConfirm: () => { closeModal(); router.push('/dashboard/riwayat'); } 
         }));
       }
     }));
@@ -341,7 +317,7 @@ function NginapKuyContent() {
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto min-h-screen text-slate-900 pb-20">
-      <CustomModal {...modal} /> {/* ✅ RENDER MODAL DI SINI */}
+      <CustomModal {...modal} />
 
       <header className="mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4">
         <div>
@@ -349,7 +325,7 @@ function NginapKuyContent() {
             🏨 Nginap Kuy 
             {isViewMode && <span className="text-[10px] bg-rose-100 text-rose-700 px-2 py-1 rounded-md uppercase tracking-widest mt-1">Read-Only</span>}
           </h2>
-          <p className="text-slate-500 mt-1">Buat tagihan kilat dengan rincian biaya transparan.</p>
+          <p className="text-slate-500 mt-1">Buat tagihan adil dengan fitur potong pengeluaran pribadi.</p>
         </div>
       </header>
 
@@ -369,77 +345,127 @@ function NginapKuyContent() {
             </div>
           </div>
           <div>
-            <label className="text-sm font-semibold text-slate-600 block mb-1.5">Siapa Yang Nalangin? (Pahlawan)</label>
+            <label className="text-sm font-semibold text-slate-600 block mb-1.5">Bendahara Utama (Pahlawan)</label>
             <select disabled={isViewMode} value={pahlawanId} onChange={(e)=>setPahlawanId(e.target.value)} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 disabled:opacity-70 focus:ring-2 focus:ring-amber-500 focus:outline-none">
               {anggota.map(a => <option key={a.id} value={a.id}>{a.nama}</option>)}
             </select>
+            <p className="text-xs text-slate-400 mt-2">Semua tagihan akan diarahkan ke bendahara. Jika ada yang pengeluarannya lebih besar dari tagihannya, bendahara akan berhutang kepadanya.</p>
           </div>
         </div>
 
-        {/* TABEL RINCIAN BIAYA */}
+        {/* PARTISIPAN & PENGELUARAN PRIBADI */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
-          <h3 className="font-bold text-lg mb-2 flex items-center gap-2"><span>📋</span> Rincian Pengeluaran</h3>
-          
-          {!isViewMode && (
-            /* ✅ BUNGKUS DENGAN DIV INI AGAR REACT TIDAK ERROR */
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-4 space-y-4">
-              
-              {/* INPUT BIASA (MANUAL) */}
-              <form onSubmit={handleTambahRincian} className="flex flex-col sm:flex-row gap-3">
-                <input type="text" placeholder="Nama Item Manual (Cth: Sewa Villa)" required value={inputItem} onChange={(e)=>setInputItem(e.target.value)} className="flex-1 px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white" />
-                <div className="relative flex-1">
-                  <span className="absolute left-3 top-2 text-sm text-slate-400 font-bold">Rp</span>
-                  <input type="text" placeholder="0" required value={inputHarga === '' ? '' : Number(inputHarga).toLocaleString('id-ID')} onChange={(e) => setInputHarga(e.target.value.replace(/\D/g, ''))} className="w-full pl-9 pr-3 py-2 text-sm font-bold border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white" />
-                </div>
-                <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-6 py-2 rounded-lg text-sm transition-colors shadow-sm">+ Tambah Manual</button>
-              </form>
-
-              {/* ✅ TOMBOL COMBINE UPLOAD STRUK OCR (OCR.SPACE) */}
-              <div className="pt-3 border-t border-dashed border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-400 uppercase">Punya Nota/Bill Panjang? Scan di sini otomatis ➔</span>
-                <label className={`w-full sm:w-auto bg-blue-100 text-blue-700 hover:bg-blue-200 px-5 py-2.5 rounded-xl font-bold text-sm border border-blue-200 shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all ${isOcrLoading ? 'opacity-50 cursor-not-allowed animate-pulse' : ''}`}>
-                  <input type="file" accept="image/*" disabled={isOcrLoading} onChange={handleOcrUpload} className="hidden" />
-                  📸 {isOcrLoading ? 'Sedang Membaca...' : 'Scan Foto Struk Bill'}
-                </label>
-              </div>
-
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h3 className="font-bold text-lg flex items-center gap-2"><span>👥</span> Partisipan & Pengeluaran</h3>
+              <p className="text-xs text-slate-500 mt-1">Total Biaya Keseluruhan: <strong className="text-amber-500">Rp {totalBiaya.toLocaleString('id-ID')}</strong></p>
             </div>
-          )}
-
-          <div className="overflow-x-auto border border-slate-200 rounded-xl mt-4">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
-                <tr>
-                  <th className="px-4 py-3 w-12 text-center">No</th>
-                  <th className="px-4 py-3">Nama Item</th>
-                  <th className="px-4 py-3 text-right">Harga (Rp)</th>
-                  {!isViewMode && <th className="px-4 py-3 w-16 text-center">Aksi</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rincianBiaya.length === 0 ? (
-                  <tr><td colSpan={isViewMode ? 3 : 4} className="text-center py-8 text-slate-400 italic">Belum ada rincian biaya.</td></tr>
+            {!isViewMode && (
+              <div className="flex items-center gap-2">
+                <select value={selectedToAdd} onChange={(e) => setSelectedToAdd(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-amber-500">
+                  <option value="">-- Tambah Orang --</option>
+                  {anggota.filter(a => !partisipanIkut.find(p => p.id === a.id)).map(a => (
+                    <option key={a.id} value={a.id}>{a.nama}</option>
+                  ))}
+                  <option disabled>──────</option>
+                  <option value="Tamu_Baru">+ Tulis Nama Tamu Baru...</option>
+                </select>
+                {selectedToAdd === 'Tamu_Baru' ? (
+                  <button onClick={() => { const nama = prompt('Masukkan nama tamu:'); if(nama) { setSelectedToAdd(nama); setTimeout(()=>handleAddPartisipan(), 100); } else setSelectedToAdd(''); }} className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm shadow-sm transition-colors">+</button>
                 ) : (
-                  rincianBiaya.map((r, idx) => (
-                    <tr key={r.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-center text-slate-500">{idx + 1}</td>
-                      <td className="px-4 py-3 font-medium text-slate-800">{r.item}</td>
-                      <td className="px-4 py-3 text-right font-bold text-slate-700">{r.harga.toLocaleString('id-ID')}</td>
-                      {!isViewMode && (
-                          <td className="px-4 py-3 text-center"><button onClick={() => setRincianBiaya(rincianBiaya.filter(item => item.id !== r.id))} className="text-rose-500 font-bold touch-manipulation">✕</button></td>
-                      )}
-                    </tr>
-                  ))
+                  <button onClick={handleAddPartisipan} className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm shadow-sm transition-colors">Add</button>
                 )}
-              </tbody>
-              <tfoot className="bg-slate-800 text-white font-bold">
-                <tr>
-                  <td colSpan={2} className="px-4 py-3 text-right uppercase tracking-wider text-xs">Total Pengeluaran</td>
-                  <td className="px-4 py-3 text-right text-lg text-amber-400">Rp {totalBiaya.toLocaleString('id-ID')}</td>
-                  {!isViewMode && <td></td>}
-                </tr>
-              </tfoot>
-            </table>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            {partisipanIkut.map((p) => {
+              const totalPribadi = p.rincianBiaya.reduce((s, r) => s + r.harga, 0);
+              return (
+                <div key={p.id} className="border border-slate-200 rounded-2xl overflow-hidden transition-all bg-white shadow-sm">
+                  {/* Card Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 cursor-pointer gap-4" onClick={() => handleUbahPartisipan(p.id, 'isExpanded', !p.isExpanded)}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-100 text-indigo-600 font-bold rounded-full flex items-center justify-center border border-indigo-200 text-sm">
+                        {p.nama.charAt(p.nama.startsWith('👤') ? 3 : 0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-800 text-sm">{p.nama}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">Sudah Keluar: <span className="font-bold text-amber-600">Rp {totalPribadi.toLocaleString('id-ID')}</span></div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 justify-between sm:justify-end w-full sm:w-auto">
+                      <label className="flex items-center gap-1.5 cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" disabled={isViewMode} checked={p.isGratis} onChange={(e) => handleUbahPartisipan(p.id, 'isGratis', e.target.checked)} className="w-4 h-4 text-emerald-500 rounded focus:ring-emerald-500 bg-white" />
+                        <span className={`text-xs font-bold ${p.isGratis ? 'text-emerald-500' : 'text-slate-400'}`}>Gratis</span>
+                      </label>
+                      {!isViewMode && (
+                        <button onClick={(e) => { e.stopPropagation(); handleUbahPartisipan(p.id, 'ikut', false); }} className="text-slate-400 hover:bg-rose-100 hover:text-rose-600 rounded-full w-8 h-8 flex items-center justify-center transition-colors">
+                          ✕
+                        </button>
+                      )}
+                      <svg className={`w-5 h-5 text-slate-400 transform transition-transform ${p.isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </div>
+                  </div>
+
+                  {/* Card Body (Rincian Biaya) */}
+                  {p.isExpanded && (
+                    <div className="p-4 border-t border-slate-100 bg-white">
+                      {!isViewMode && (
+                        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                          <form className="flex flex-1 gap-2" onSubmit={(e) => {
+                            e.preventDefault();
+                            const form = e.target as HTMLFormElement;
+                            const item = (form.elements.namedItem('item') as HTMLInputElement).value;
+                            const hrg = Number((form.elements.namedItem('harga') as HTMLInputElement).value.replace(/\D/g, ''));
+                            if (!item || !hrg) return;
+                            setPartisipan(prev => prev.map(x => x.id === p.id ? { ...x, rincianBiaya: [...x.rincianBiaya, { id: 'r_'+Date.now(), item, harga: hrg }] } : x));
+                            form.reset();
+                          }}>
+                            <input name="item" type="text" placeholder="Nama pengeluaran (Cth: Bensin)" required className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                            <input name="harga" type="number" placeholder="Harga" required className="w-28 sm:w-32 px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                            <button type="submit" className="bg-amber-100 text-amber-700 font-bold px-3 py-2 rounded-lg text-xs hover:bg-amber-200 transition-colors">Tambah</button>
+                          </form>
+                          <label className={`bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-2 rounded-lg font-bold text-xs border border-blue-100 flex items-center justify-center cursor-pointer transition-colors ${isOcrLoading ? 'opacity-50 pointer-events-none' : ''}`}>
+                            <input type="file" accept="image/*" disabled={isOcrLoading} onChange={(e) => handleOcrUpload(e, p.id)} className="hidden" />
+                            📸 Scan Struk
+                          </label>
+                        </div>
+                      )}
+
+                      {p.rincianBiaya.length === 0 ? (
+                        <div className="text-center py-4 text-xs text-slate-400 italic">Belum ada pengeluaran yang dicatat.</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left mb-2">
+                            <tbody>
+                              {p.rincianBiaya.map(r => (
+                                <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                                  <td className="py-2.5 px-2 text-slate-700">{r.item}</td>
+                                  <td className="py-2.5 px-2 text-right font-bold text-slate-700">Rp {r.harga.toLocaleString('id-ID')}</td>
+                                  {!isViewMode && (
+                                    <td className="w-8 text-right px-1">
+                                      <button onClick={() => setPartisipan(prev => prev.map(x => x.id === p.id ? { ...x, rincianBiaya: x.rincianBiaya.filter(y => y.id !== r.id) } : x))} className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 w-6 h-6 rounded-full font-bold flex items-center justify-center touch-manipulation">✕</button>
+                                    </td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            
+            {partisipanIkut.length === 0 && (
+              <div className="text-center py-10 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-sm font-medium">
+                Belum ada orang yang dipilih. Silakan pilih dari dropdown di atas.
+              </div>
+            )}
           </div>
         </div>
 
@@ -447,135 +473,87 @@ function NginapKuyContent() {
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-slate-100">
             <div>
-              <h3 className="font-bold text-lg flex items-center gap-2"><span>🔪</span> Skema Split Bill</h3>
+              <h3 className="font-bold text-lg flex items-center gap-2"><span>🔪</span> Skema Split Bill Akhir</h3>
+              <p className="text-xs text-slate-500 mt-1">Pembagian Beban - Total Sudah Keluar = Hutang Akhir</p>
             </div>
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button type="button" disabled={isViewMode} onClick={() => setModeSplit('bagi_rata')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${modeSplit === 'bagi_rata' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'} ${isViewMode && 'opacity-70 cursor-not-allowed'} touch-manipulation`}>Bagi Rata</button>
-              <button type="button" disabled={isViewMode} onClick={() => setModeSplit('manual')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${modeSplit === 'manual' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'} ${isViewMode && 'opacity-70 cursor-not-allowed'} touch-manipulation`}>Input Manual</button>
+            
+            <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+              <button disabled={isViewMode} onClick={()=>setModeSplit('bagi_rata')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${modeSplit === 'bagi_rata' ? 'bg-white text-amber-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>Bagi Rata</button>
+              <button disabled={isViewMode} onClick={()=>setModeSplit('manual')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${modeSplit === 'manual' ? 'bg-white text-amber-600 shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>Manual</button>
             </div>
           </div>
 
-          {/* 👇 INI BAGIAN YANG TADI TERHAPUS (Tombol & Wrapper) 👇 */}
-          <div className="mb-6 relative" ref={dropdownRef}>
-            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Pilih PIC (Siapa Saja Yang Ikut)</label>
-            <button type="button" disabled={isViewMode} onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="w-full flex justify-between items-center px-4 py-3 bg-white disabled:bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-amber-500 touch-manipulation">
-              <span>👤 {partisipanIkut.length} Partisipan Terpilih</span>
-              <span className="text-[10px]">▼</span>
-            </button>
-
-            {/* 👇 ISI DROPDOWN 👇 */}
-            {isDropdownOpen && !isViewMode && (
-              <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-72 overflow-y-auto p-2 space-y-1">
-                
-                {/* 👤 1. TAMPILKAN MEMBER AKTIF DI ATAS */}
-                {partisipan.filter(p => !p.isTamu).map(p => (
-                  <label key={p.id} className="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-lg cursor-pointer">
-                    <input type="checkbox" checked={p.ikut} onChange={(e) => handleUbahPartisipan(p.id, 'ikut', e.target.checked)} className="w-5 h-5 text-amber-500 rounded"/>
-                    <span className={`text-sm ${p.ikut ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{p.nama}</span>
-                  </label>
-                ))}
-                
-                {/* ➖ GARIS PEMBATAS UNTUK TAMU MASA LALU */}
-                <div className="h-px bg-slate-200 my-2 mx-1"></div>
-                <div className="text-[10px] font-black text-blue-600 px-2.5 uppercase tracking-wider mb-1">📋 Orang Asing Di Muka Pintu</div>
-
-                {/* 👻 2. TAMPILKAN DAFTAR TAMU DI PALING BAWAH DROPDOWN */}
-                {partisipan.filter(p => p.isTamu).length === 0 ? (
-                  <div className="text-[11px] text-slate-400 italic px-2.5 py-1">Belum ada riwayat tamu.</div>
-                ) : (
-                  partisipan.filter(p => p.isTamu).map(p => (
-                    <label key={p.id} className="flex items-center gap-3 p-2.5 hover:bg-blue-50/40 rounded-lg cursor-pointer">
-                      <input type="checkbox" checked={p.ikut} onChange={(e) => handleUbahPartisipan(p.id, 'ikut', e.target.checked)} className="w-5 h-5 text-blue-500 rounded"/>
-                      <span className={`text-sm ${p.ikut ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{p.nama}</span>
-                    </label>
-                  ))
-                )}
-
-                {/* ➕ 3. INPUT FORM KHUSUS JIKA INGIN TAMBAH TAMU BARU YANG BELUM PERNAH IKUT */}
-                <div className="p-2 border-t border-slate-100 mt-2 flex gap-2 bg-slate-50 rounded-lg">
-                  <input 
-                    type="text" 
-                    placeholder="Tambah nama tamu baru..." 
-                    id="input-tamu-baru-nginap"
-                    className="flex-1 text-xs border border-slate-200 bg-white rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 font-medium"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const val = (e.target as HTMLInputElement).value.trim();
-                        if (val && !partisipan.some(p => p.id === val)) {
-                          setPartisipan(prev => [...prev, { id: val, nama: `👤 ${val} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, isTamu: true }]);
-                          (e.target as HTMLInputElement).value = '';
-                        }
-                      }
-                    }}
-                  />
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      const inputEl = document.getElementById('input-tamu-baru-nginap') as HTMLInputElement;
-                      const val = inputEl?.value.trim();
-                      if (val && !partisipan.some(p => p.id === val)) {
-                        setPartisipan(prev => [...prev, { id: val, nama: `👤 ${val} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, isTamu: true }]);
-                        inputEl.value = '';
-                      }
-                    }}
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1 rounded shadow-sm transition-colors"
-                  >
-                    + Tambah
-                  </button>
-                </div>
-
-              </div>
-            )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left border-collapse">
+              <thead className="text-xs text-slate-400 uppercase bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 rounded-tl-xl border-b border-slate-100">Partisipan</th>
+                  {modeSplit === 'manual' && <th className="px-4 py-3 text-right border-b border-slate-100">Beban Manual</th>}
+                  <th className="px-4 py-3 text-right rounded-tr-xl border-b border-slate-100">Hutang / (Piutang)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {partisipanIkut.map((p) => {
+                  const tagihanSisa = hasilSimulasi[p.id] || 0;
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-4 py-3.5">
+                        <div className="font-bold text-slate-800">{p.nama}</div>
+                        <div className="text-[10px] text-slate-400">{p.isGratis ? 'Bebas Biaya' : 'Ikut Patungan'}</div>
+                      </td>
+                      {modeSplit === 'manual' && (
+                        <td className="px-4 py-3.5 text-right">
+                           <input disabled={isViewMode || p.isGratis} type="number" value={p.nominalManual || ''} onChange={(e) => handleUbahPartisipan(p.id, 'nominalManual', Number(e.target.value) as any)} className="w-24 text-right px-2 py-1 text-sm border rounded-md" />
+                        </td>
+                      )}
+                      <td className="px-4 py-3.5 text-right">
+                        {p.isGratis ? (
+                          <span className="text-emerald-500 font-bold text-xs uppercase bg-emerald-50 px-2 py-1 rounded">Gratis</span>
+                        ) : tagihanSisa > 0 ? (
+                          <div className="flex flex-col items-end">
+                            <span className="font-black text-lg text-rose-500">Rp {Math.round(tagihanSisa).toLocaleString('id-ID')}</span>
+                            <span className="text-[9px] text-rose-400 font-bold">Bayar ke Bendahara</span>
+                          </div>
+                        ) : tagihanSisa < 0 ? (
+                          <div className="flex flex-col items-end">
+                            <span className="font-black text-lg text-emerald-500">Rp {Math.abs(Math.round(tagihanSisa)).toLocaleString('id-ID')}</span>
+                            <span className="text-[9px] text-emerald-600 font-bold">Diterima dari Bendahara</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-bold">Lunas (Impas)</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-          {/* 👆 WRAPPER & TOMBOL DROPDOWN SELESAI 👆 */}
-
-          <div className="space-y-3">
-            {partisipanIkut.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-sm italic bg-slate-50 rounded-xl border border-dashed">Silakan pilih partisipan.</div>
-            ) : (
-              partisipanIkut.map(p => (
-                <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl border border-slate-200 bg-white">
-                  <div className="flex items-center gap-4 mb-3 sm:mb-0">
-                    <span className="font-bold text-slate-800 w-24 truncate">{p.nama}</span>
-                    {modeSplit === 'bagi_rata' && (
-                      <label className={`flex items-center gap-1.5 ${isViewMode ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'} bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg`}>
-                        <input disabled={isViewMode} type="checkbox" checked={p.isGratis} onChange={(e) => handleUbahPartisipan(p.id, 'isGratis', e.target.checked)} className="w-4 h-4 text-emerald-500 rounded"/>
-                        <span className="text-xs font-bold text-slate-600">Gratis</span>
-                      </label>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    {modeSplit === 'bagi_rata' ? (
-                      <div className="flex flex-col items-end">
-                        <span className={`font-black text-lg ${p.isGratis ? 'text-emerald-500 line-through decoration-2 opacity-50' : 'text-slate-900'}`}>Rp {Math.round(hasilSimulasi[p.id]).toLocaleString('id-ID')}</span>
-                      </div>
-                    ) : (
-                      <div className="relative w-full sm:w-48">
-                        <span className="absolute left-3 top-2 text-sm text-slate-400 font-bold">Rp</span>
-                        <input disabled={isViewMode} type="text" value={p.nominalManual === 0 ? '' : p.nominalManual.toLocaleString('id-ID')} onChange={(e) => setPartisipan(prev => prev.map(item => item.id === p.id ? { ...item, nominalManual: Number(e.target.value.replace(/\D/g, '')) } : item))} placeholder="0" className="w-full pl-9 pr-3 py-2 border disabled:bg-slate-50 rounded-xl font-bold text-slate-900 text-right"/>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          
+          {modeSplit === 'manual' && Math.round(selisihManual) !== 0 && (
+            <div className={`mt-6 p-4 rounded-xl border ${selisihManual > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-rose-50 border-rose-200 text-rose-800'} flex justify-between items-center text-sm font-medium animate-pulse`}>
+              <span>{selisihManual > 0 ? '⚠️ Uang Kurang:' : '⚠️ Uang Berlebih (Kelebihan Target):'}</span>
+              <span className="font-bold text-lg">Rp {Math.abs(Math.round(selisihManual)).toLocaleString('id-ID')}</span>
+            </div>
+          )}
         </div>
 
+        {/* TOMBOL AKSI */}
         {!isViewMode && (
-            <button onClick={handleBuatTagihan} disabled={!namaProyek || totalBiaya === 0 || partisipanIkut.length === 0} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-lg shadow-lg disabled:opacity-50 transition-colors touch-manipulation">
-               🚀 Buat & Sebar Tagihan Sekarang
-            </button>
+          <div className="flex justify-end pt-4">
+             <button onClick={handleBuatTagihan} className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-8 py-4 rounded-2xl shadow-lg shadow-emerald-500/30 transition-transform transform hover:-translate-y-1 active:translate-y-0 text-lg flex items-center justify-center gap-2">
+               <span>🚀</span> Simpan & Sebar Tagihan
+             </button>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-export default function NginapKuyPage() {
+export default function NginapKuy() {
   return (
-    <Suspense fallback={<div className="p-12 text-center text-slate-500 font-bold animate-pulse">Menyiapkan halaman...</div>}>
+    <Suspense fallback={<div className="p-12 text-center text-slate-500 font-bold animate-pulse">Memuat Aplikasi...</div>}>
       <NginapKuyContent />
     </Suspense>
   );
