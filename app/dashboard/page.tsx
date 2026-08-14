@@ -141,67 +141,72 @@ export default function DashboardPage() {
     <div className="p-8 max-w-4xl mx-auto text-slate-900">
       <CustomModal {...modal} />
 
-      <header className="mb-8">
-        <h2 className="text-3xl font-extrabold tracking-tight">Halo, {currentUser?.nama}! 👋</h2>
-        <p className="text-slate-500 mt-1">Dashboard real-time dari database KitaKitaSemua.</p>
+      <header className="mb-10 text-center sm:text-left mt-4">
+        <h2 className="text-4xl font-black tracking-tight text-slate-800">Halo bosku, <span className="text-amber-500">{currentUser?.nama}</span>! ☕</h2>
+        <p className="text-slate-500 mt-2 font-medium">Nih rekap keuangan tongkrongan kita hari ini.</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
-          <div className="absolute top-0 w-full h-2 bg-rose-500"></div>
-          <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-rose-100">💸</div>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hutang Berjalan Anda</p>
-          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {Math.round(totalHutangBerjalan).toLocaleString('id-ID')}</h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div className="bg-white rounded-[2rem] p-8 border-[3px] border-rose-100 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden transition-transform hover:-translate-y-1 hover:shadow-xl hover:shadow-rose-500/10">
+          <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center text-3xl mb-4 border border-rose-100 rotate-[-5deg]">💸</div>
+          <p className="text-sm font-black text-rose-400 uppercase tracking-widest mb-1">Utang Lu (Bayar woi!)</p>
+          <h4 className="text-4xl font-black text-slate-800 tracking-tight">Rp {Math.round(totalHutangBerjalan).toLocaleString('id-ID')}</h4>
         </div>
-        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
-          <div className="absolute top-0 w-full h-2 bg-emerald-500"></div>
-          <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-2xl mb-3 border border-emerald-100">🤑</div>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Piutang (Uang Anda)</p>
-          <h4 className="text-3xl font-black text-slate-900 mt-1">Rp {Math.round(totalPiutangBerjalan).toLocaleString('id-ID')}</h4>
+        
+        <div className="bg-white rounded-[2rem] p-8 border-[3px] border-emerald-100 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden transition-transform hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/10">
+          <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center text-3xl mb-4 border border-emerald-100 rotate-[5deg]">🤑</div>
+          <p className="text-sm font-black text-emerald-500 uppercase tracking-widest mb-1">Duit Lu di Orang (Tagihin!)</p>
+          <h4 className="text-4xl font-black text-slate-800 tracking-tight">Rp {Math.round(totalPiutangBerjalan).toLocaleString('id-ID')}</h4>
         </div>
       </div>
 
       {(totalHutangBerjalan > 0 || totalPiutangBerjalan > 0) && (
-        <div className="text-center mb-10">
-          <button onClick={() => router.push('/dashboard/riwayat')} className="bg-slate-900 text-white hover:bg-slate-800 font-bold px-8 py-3.5 rounded-2xl text-sm shadow-md transition-colors flex items-center justify-center gap-2 w-full md:w-auto mx-auto">
-            Lihat Rincian Penagihan ➔
+        <div className="text-center mb-12">
+          <button onClick={() => router.push('/dashboard/riwayat')} className="bg-slate-800 text-white hover:bg-black font-bold px-8 py-4 rounded-full shadow-lg shadow-slate-900/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 w-full md:w-auto mx-auto">
+            Lihat Rincian Bon ➔
           </button>
         </div>
       )}
 
       <div>
-        <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><span>🎯</span> Project & Sesi Saya</h3>
-        <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+        <h3 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">
+          <span className="text-3xl">⛺</span> Lapak Tongkrongan yang Masih Buka
+        </h3>
+        
+        <div className="flex flex-col gap-4">
           {history.length === 0 ? (
-            <div className="p-12 text-center flex flex-col items-center">
-              <span className="text-4xl mb-3 opacity-50">📭</span>
-              <span className="text-slate-500 font-medium">Belum ada project yang terbuka.</span>
+            <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-[2rem] p-12 text-center flex flex-col items-center">
+              <span className="text-5xl mb-4 grayscale opacity-40">📭</span>
+              <span className="text-slate-500 font-bold">Sepi euy. Belum ada lapak tongkrongan yang buka hari ini.</span>
             </div>
           ) : (
             history.map(sesi => (
-              <div key={sesi.id} onClick={() => handleKlikSesi(sesi)} className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center hover:bg-slate-50 cursor-pointer transition-colors gap-3 group">
-                <div>
-                  <div className="font-bold text-slate-900 text-lg flex items-center gap-2">
-                    {sesi.nama_acara}
-                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${sesi.tipe_acara === 'JAJAN' ? 'bg-amber-100 text-amber-700' : sesi.tipe_acara === 'PROJECT' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                      {sesi.tipe_acara}
-                    </span>
-                    <span className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 rounded-md animate-pulse uppercase font-bold">Berjalan</span>
+              <div key={sesi.id} onClick={() => handleKlikSesi(sesi)} className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-sm flex flex-col sm:flex-row sm:justify-between sm:items-center hover:border-amber-300 hover:shadow-xl hover:shadow-amber-500/5 cursor-pointer transition-all gap-4 group">
+                <div className="flex gap-4 items-center">
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl border-4 border-white shadow-sm shrink-0
+                    ${sesi.tipe_acara === 'JAJAN' ? 'bg-amber-100' : sesi.tipe_acara === 'PROJECT' ? 'bg-blue-100' : 'bg-purple-100'}`}>
+                    {sesi.tipe_acara === 'JAJAN' ? '🍔' : sesi.tipe_acara === 'PROJECT' ? '🛠️' : '🏨'}
                   </div>
-                  <div className="text-xs text-slate-500 mt-1 font-medium">{sesi.tanggal}</div>
+                  <div>
+                    <div className="font-black text-slate-800 text-xl flex flex-wrap items-center gap-2">
+                      {sesi.nama_acara}
+                      <span className="bg-emerald-100 text-emerald-700 text-[9px] px-2 py-1 rounded-full animate-pulse uppercase font-black tracking-wider">🟢 ON GOING</span>
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1 font-bold tracking-wide">{sesi.tanggal}</div>
+                  </div>
                 </div>
                 
-                <div className="flex items-center gap-4 sm:justify-end">
-                  <div className="text-right">
-                    <div className="font-black text-slate-800 text-lg">Rp {Math.round(Number(sesi.total_biaya || 0)).toLocaleString('id-ID')}</div>
-                    <div className="text-[11px] font-semibold text-slate-400">{sesi.partisipan_ids?.length || 0} Partisipan</div>
+                <div className="flex items-center gap-6 justify-between sm:justify-end ml-16 sm:ml-0 border-t sm:border-t-0 border-slate-100 pt-4 sm:pt-0">
+                  <div className="text-left sm:text-right">
+                    <div className="font-black text-slate-800 text-xl">Rp {Math.round(Number(sesi.total_biaya || 0)).toLocaleString('id-ID')}</div>
+                    <div className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md inline-block mt-1">{sesi.partisipan_ids?.length || 0} Anak Nongkrong</div>
                   </div>
                   
                   <div className="flex gap-2">
-                    <button onClick={(e) => tutupSesi(e, sesi.id)} className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors border border-rose-200 opacity-0 group-hover:opacity-100 sm:flex hidden touch-manipulation">
-                      Tutup
+                    <button onClick={(e) => tutupSesi(e, sesi.id)} className="bg-slate-100 text-slate-600 hover:bg-slate-800 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all border border-slate-200 opacity-100 sm:opacity-0 group-hover:opacity-100 touch-manipulation hover:scale-105 active:scale-95 shadow-sm">
+                      Bungkus!
                     </button>
-                    <button onClick={(e) => hapusSesi(e, sesi.id)} className="bg-slate-100 text-slate-500 hover:bg-slate-600 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors opacity-0 group-hover:opacity-100 sm:flex hidden touch-manipulation" title="Hapus Permanen">
+                    <button onClick={(e) => hapusSesi(e, sesi.id)} className="bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white text-xs font-bold px-3 py-2.5 rounded-xl transition-all border border-rose-100 opacity-100 sm:opacity-0 group-hover:opacity-100 touch-manipulation hover:scale-105 active:scale-95 shadow-sm" title="Hapus Permanen">
                       🗑️
                     </button>
                   </div>

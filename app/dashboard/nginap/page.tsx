@@ -50,6 +50,14 @@ function NginapKuyContent() {
   });
   const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
 
+  // OCR Preview State
+  const [ocrPreview, setOcrPreview] = useState<{
+    isOpen: boolean;
+    participantId: string;
+    rawLines: { id: string, text: string, isChecked: boolean }[];
+    selectedItems: { id: string, item: string, harga: number }[];
+  }>({ isOpen: false, participantId: '', rawLines: [], selectedItems: [] });
+
   // Helper Total Biaya
   const partisipanIkut = partisipan.filter(p => p.ikut);
   const totalBiaya = partisipanIkut.reduce((sum, p) => sum + p.rincianBiaya.reduce((s, r) => s + r.harga, 0), 0);
@@ -97,15 +105,10 @@ function NginapKuyContent() {
                return { ...p, ikut: isIkut };
              });
 
-             // Migrasi data lama jika ada rincian global
              if (eventData.data_ekstra?.rincian && eventData.data_ekstra.rincian.length > 0) {
                const pahlawan = finalPartisipan.find(p => p.id === (eventData.pahlawan_ids?.[0] || user.id));
-               if (pahlawan) {
-                 pahlawan.rincianBiaya = eventData.data_ekstra.rincian;
-               }
+               if (pahlawan) pahlawan.rincianBiaya = eventData.data_ekstra.rincian;
              }
-
-             // Migrasi data baru (per orang)
              if (eventData.data_ekstra?.rincianPerOrang) {
                 Object.keys(eventData.data_ekstra.rincianPerOrang).forEach(pid => {
                   const p = finalPartisipan.find(x => x.id === pid);
@@ -114,8 +117,7 @@ function NginapKuyContent() {
              }
          }
       } else {
-         // Default if creating new: Include Creator
-         finalPartisipan = finalPartisipan.map(p => p.id === user.id ? { ...p, ikut: true } : p);
+         finalPartisipan = finalPartisipan.map(p => p.id === user.id ? { ...p, ikut: true, isExpanded: true } : p);
          setPahlawanId(user.id);
       }
 
@@ -129,10 +131,9 @@ function NginapKuyContent() {
     setPartisipan(prev => {
       const existing = prev.find(p => p.id === selectedToAdd);
       if (existing) {
-        return prev.map(p => p.id === selectedToAdd ? { ...p, ikut: true } : p);
+        return prev.map(p => p.id === selectedToAdd ? { ...p, ikut: true, isExpanded: true } : p);
       } else {
-        // Tamu baru
-        return [...prev, { id: selectedToAdd, nama: `👤 ${selectedToAdd} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, rincianBiaya: [], isTamu: true }];
+        return [...prev, { id: selectedToAdd, nama: `👤 ${selectedToAdd} (Tamu)`, ikut: true, isGratis: false, nominalManual: 0, rincianBiaya: [], isTamu: true, isExpanded: true }];
       }
     });
     setSelectedToAdd('');
@@ -185,22 +186,66 @@ function NginapKuyContent() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      if (data.items && data.items.length > 0) {
-        setPartisipan(prev => prev.map(p => p.id === participantId ? { ...p, rincianBiaya: [...p.rincianBiaya, ...data.items] } : p));
-        setModal(prev => ({
-          ...prev, isOpen: true, type: 'success', title: 'Scan Berhasil!', 
-          message: `Berhasil mendeteksi & menambahkan ${data.items.length} item pengeluaran ke ${partisipan.find(x => x.id === participantId)?.nama}!`,
-          onConfirm: closeModal
-        }));
+      if (data.rawLines && data.rawLines.length > 0) {
+        closeModal(); // Tutup loading
+        setOcrPreview({
+          isOpen: true,
+          participantId: participantId,
+          rawLines: data.rawLines.map((text: string, i: number) => ({ id: `raw_${i}_${Date.now()}`, text, isChecked: false })),
+          selectedItems: []
+        });
       } else {
-        setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Jelas', message: 'Tidak menemukan format nama item & harga yang cocok.', onConfirm: closeModal }));
+        setModal(prev => ({ ...prev, isOpen: true, type: 'warning', title: 'Teks Tidak Terbaca', message: 'Gagal mendeteksi baris teks dari gambar struk.', onConfirm: closeModal }));
       }
     } catch (err: any) {
       setModal(prev => ({ ...prev, isOpen: true, type: 'error', title: 'Gagal Scan', message: err.message || 'Terjadi kegagalan koneksi sistem OCR.', onConfirm: closeModal }));
     } finally {
       setIsOcrLoading(false);
-      e.target.value = ''; // reset file input
+      e.target.value = ''; 
     }
+  };
+
+  const handleOcrPreviewSave = () => {
+    if (ocrPreview.selectedItems.length > 0) {
+      setPartisipan(prev => prev.map(p => 
+        p.id === ocrPreview.participantId 
+        ? { ...p, rincianBiaya: [...p.rincianBiaya, ...ocrPreview.selectedItems] } 
+        : p
+      ));
+    }
+    setOcrPreview({ isOpen: false, participantId: '', rawLines: [], selectedItems: [] });
+  };
+
+  const handleToggleRawLine = (rawLineId: string, text: string, checked: boolean) => {
+    setOcrPreview(prev => {
+      const newRawLines = prev.rawLines.map(r => r.id === rawLineId ? { ...r, isChecked: checked } : r);
+      let newSelected = [...prev.selectedItems];
+      
+      if (checked) {
+        let nama = text;
+        let harga = 0;
+        
+        // Regex cari: [Teks bebas] diikuti [Angka di akhir baris]
+        const match = text.match(/^(.*?)\s*(\d{1,3}(?:\.\d{3})*(?:,\d+)?|\d+)\s*$/);
+        if (match) {
+          nama = match[1].trim() || 'Item';
+          harga = Number(match[2].replace(/\./g, '').replace(/,/g, '.').replace(/\D/g, ''));
+        } else {
+          // Kalau baris ini hanya berisi angka saja (contoh: 75.000)
+          const numMatch = text.match(/^(\d{1,3}(?:\.\d{3})*(?:,\d+)?|\d+)$/);
+          if (numMatch) {
+             nama = 'Item';
+             harga = Number(numMatch[1].replace(/\./g, '').replace(/,/g, '.').replace(/\D/g, ''));
+          }
+        }
+        
+        newSelected.push({ id: `sel_${rawLineId}`, item: nama, harga });
+      } else {
+        newSelected = newSelected.filter(s => s.id !== `sel_${rawLineId}`);
+      }
+      
+      return { ...prev, rawLines: newRawLines, selectedItems: newSelected };
+    });
   };
 
   const handleUbahPartisipan = (id: string, field: 'ikut' | 'isGratis' | 'isExpanded' | 'nominalManual', value: any) => {
@@ -269,9 +314,7 @@ function NginapKuyContent() {
           data_ekstra: { rincianPerOrang }
         });
 
-        if (eventError) {
-          return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: eventError.message, onConfirm: closeModal, onCancel: undefined }));
-        }
+        if (eventError) return setModal(p => ({ ...p, isOpen: true, type: 'error', title: 'Gagal', message: eventError.message, onConfirm: closeModal, onCancel: undefined }));
 
         const newTransfers: any[] = [];
         const newTamuTransfers: any[] = [];
@@ -279,17 +322,11 @@ function NginapKuyContent() {
         partisipanIkut.forEach(p => {
           const hutang = Math.round(hasilSimulasi[p.id]);
           if (p.id !== pahlawanId && hutang !== 0) {
-            const payload = {
-              event_id: idSesi,
-              nominal: Math.abs(hutang),
-              status: 'Belum Bayar'
-            };
+            const payload = { event_id: idSesi, nominal: Math.abs(hutang), status: 'Belum Bayar' };
             if (hutang > 0) {
-              // p owes pahlawan
               if (p.isTamu) newTamuTransfers.push({ ...payload, nama_tamu: p.id, ke_user_id: pahlawanId });
               else newTransfers.push({ ...payload, dari_user_id: p.id, ke_user_id: pahlawanId });
             } else {
-              // pahlawan owes p
               if (p.isTamu) newTamuTransfers.push({ ...payload, dari_user_id: pahlawanId, nama_tamu: p.id });
               else newTransfers.push({ ...payload, dari_user_id: pahlawanId, ke_user_id: p.id });
             }
@@ -318,6 +355,96 @@ function NginapKuyContent() {
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto min-h-screen text-slate-900 pb-20">
       <CustomModal {...modal} />
+
+      {/* OCR PREVIEW MODAL */}
+      {ocrPreview.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-lg text-slate-800">Preview Hasil Scan 📸</h3>
+                <p className="text-xs text-slate-500 mt-1">Centang pengeluaran yang ingin ditambahkan. Cek teks asli jika ada yang salah tebak.</p>
+              </div>
+              <button onClick={() => setOcrPreview({ ...ocrPreview, isOpen: false })} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 text-slate-500 hover:bg-slate-300">✕</button>
+            </div>
+            
+            <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+              {/* KOLOM KIRI: Raw Text OCR */}
+              <div className="flex-1 lg:max-w-sm p-6 overflow-y-auto bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200 custom-scrollbar flex flex-col">
+                <h4 className="text-sm font-bold text-slate-700 mb-2">Teks Asli dari OCR:</h4>
+                <p className="text-xs text-slate-500 mb-4">Pilih baris yang mengandung nama barang atau harga.</p>
+                <div className="space-y-1">
+                  {ocrPreview.rawLines.map((raw) => (
+                    <label key={raw.id} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${raw.isChecked ? 'bg-amber-100 text-amber-800 font-bold' : 'hover:bg-slate-200 text-slate-600'}`}>
+                      <input 
+                        type="checkbox" 
+                        checked={raw.isChecked}
+                        onChange={(e) => handleToggleRawLine(raw.id, raw.text, e.target.checked)}
+                        className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500"
+                      />
+                      <span className="text-xs font-mono">{raw.text}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* KOLOM KANAN: Pengeluaran Terpilih */}
+              <div className="flex-1 p-6 overflow-y-auto bg-white custom-scrollbar space-y-3">
+                <h4 className="text-sm font-bold text-slate-700 mb-2">Pengeluaran Terpilih:</h4>
+                <p className="text-xs text-slate-500 mb-4">Edit atau gabungkan harga di sini sebelum disimpan.</p>
+                
+                {ocrPreview.selectedItems.length === 0 ? (
+                  <div className="text-center p-8 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-medium">
+                    Belum ada baris yang dipilih.
+                  </div>
+                ) : (
+                  ocrPreview.selectedItems.map((item, idx) => (
+                    <div key={item.id} className="flex flex-col sm:flex-row gap-2 w-full p-3 border border-amber-200 bg-amber-50/30 rounded-xl">
+                      <input 
+                        type="text" 
+                        value={item.item} 
+                        onChange={(e) => setOcrPreview(prev => ({
+                          ...prev, selectedItems: prev.selectedItems.map((it, i) => i === idx ? { ...it, item: e.target.value } : it)
+                        }))}
+                        className="flex-1 bg-white px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+                      />
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 text-sm font-bold">Rp</span>
+                        <input 
+                          type="number" 
+                          value={item.harga} 
+                          onChange={(e) => setOcrPreview(prev => ({
+                            ...prev, selectedItems: prev.selectedItems.map((it, i) => i === idx ? { ...it, harga: Number(e.target.value) } : it)
+                          }))}
+                          className="w-full sm:w-28 bg-white px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-bold text-right"
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+                
+                {ocrPreview.selectedItems.length > 0 && (
+                  <div className="pt-2">
+                    <button 
+                      onClick={() => setOcrPreview(prev => ({ ...prev, selectedItems: [...prev.selectedItems, { id: 'sel_manual_'+Date.now(), item: '', harga: 0 }] }))} 
+                      className="text-xs text-amber-600 font-bold hover:text-amber-700 underline"
+                    >
+                      + Tambah Baris Manual
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-white flex gap-3">
+              <button onClick={() => setOcrPreview({ ...ocrPreview, isOpen: false, rawLines: [], selectedItems: [] })} className="flex-1 px-4 py-3 bg-white border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors">Batal</button>
+              <button onClick={handleOcrPreviewSave} className="flex-1 px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-colors">
+                Tambahkan ({ocrPreview.selectedItems.length} Item)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <header className="mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4">
         <div>

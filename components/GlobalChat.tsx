@@ -42,6 +42,19 @@ export default function GlobalChat({ profile }: { profile: Profile | null }) {
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Unread & Mention States
+  const [hasUnread, setHasUnread] = useState(false);
+  const [hasMention, setHasMention] = useState(false);
+  const isOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+    if (isOpen) {
+      setHasUnread(false);
+      setHasMention(false);
+    }
+  }, [isOpen]);
+
   // Mention State
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [showMentions, setShowMentions] = useState(false);
@@ -140,6 +153,13 @@ export default function GlobalChat({ profile }: { profile: Profile | null }) {
           } as ChatMessage;
 
           setMessages(prev => [...prev, newMsg]);
+
+          if (!isOpenRef.current && newMsg.user_id !== profile.id) {
+            setHasUnread(true);
+            if (newMsg.message.toLowerCase().includes(`@${profile.nama.toLowerCase()}`)) {
+              setHasMention(true);
+            }
+          }
         }
         else if (payload.eventType === 'DELETE') {
           setMessages(prev => prev.filter(m => m.id !== payload.old.id));
@@ -270,17 +290,21 @@ export default function GlobalChat({ profile }: { profile: Profile | null }) {
           ============================================== */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-50 p-4 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-2xl transition-all transform hover:scale-110 active:scale-95 group"
+        className={`fixed bottom-6 right-6 z-50 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-2xl transition-all transform active:scale-95 group flex items-center justify-center
+          ${hasMention ? 'p-5 scale-125 animate-bounce shadow-amber-500/50' : 'p-3 hover:scale-105'}
+        `}
       >
         {isOpen ? (
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
         ) : (
           <div className="relative">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-            <span className="absolute -top-1 -right-1 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </span>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+            {hasUnread && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+            )}
           </div>
         )}
       </button>
@@ -342,7 +366,7 @@ export default function GlobalChat({ profile }: { profile: Profile | null }) {
                           </button>
                         )}
                       </div>
-                      <span className="text-[8px] text-slate-400 mt-1">{new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="text-[8px] text-slate-400 mt-1">{new Date(msg.created_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                   </div>
                 );

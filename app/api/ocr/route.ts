@@ -40,38 +40,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ items: [] });
     }
 
-    // 3. LOGIKA PARSING RAW TEXT (Sama pintarnya seperti sebelumnya)
+    // 3. Kembalikan semua baris mentah apa adanya
     const lines = rawText.split('\n');
-    const parsedItems = [];
-    const kataKunciAbaikan = ['total', 'grand', 'subtotal', 'kembali', 'cash', 'tunai', 'pajak', 'tax', 'diskon', 'discount', 'netto', 'change', 'amount'];
-
+    const rawLines = [];
     for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
-
-      // Regex mencari Teks diikuti dengan Harga (mendukung format dari OCR.Space yang dipisah dengan Tab/Spasi)
-      const regexRupiah = /(.*?)\s+(?:(?:Rp|RP)?\.?\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{4,9})/i;
-      const match = line.match(regexRupiah);
-
-      if (match) {
-        const namaItem = match[1].trim();
-        const hargaStr = match[2].replace(/\D/g, ''); 
-        const hargaNum = Number(hargaStr);
-
-        const apakahKataKunciAbaikan = kataKunciAbaikan.some(kata => namaItem.toLowerCase().includes(kata));
-
-        // Abaikan jika item kosong, harga tidak masuk akal, atau itu baris totalan
-        if (namaItem && namaItem.length > 2 && hargaNum > 100 && !apakahKataKunciAbaikan) {
-          parsedItems.push({
-            id: 'ocr_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now(),
-            item: namaItem,
-            harga: hargaNum
-          });
-        }
+      if (line.trim()) {
+        rawLines.push(line.trim());
       }
     }
 
-    return NextResponse.json({ items: parsedItems });
+    return NextResponse.json({ rawLines });
 
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
