@@ -99,6 +99,21 @@ function BukuLapakContent() {
     const [isTambahKolom, setIsTambahKolom] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [modalNalangin, setModalNalangin] = useState<{ isOpen: boolean, rowId: string | null }>({ isOpen: false, rowId: null });
+    const [abaikanRotasi, setAbaikanRotasi] = useState(false);
+
+    const handleForceLandscape = async () => {
+        try {
+            if (document.documentElement.requestFullscreen) {
+                await document.documentElement.requestFullscreen();
+            }
+            if (screen && screen.orientation && (screen.orientation as any).lock) {
+                await (screen.orientation as any).lock('landscape');
+            }
+        } catch (err) {
+            console.error(err);
+        }
+        setAbaikanRotasi(true);
+    };
 
     // ✅ STATE CUSTOM MODAL
     const [modal, setModal] = useState({
@@ -376,11 +391,19 @@ function BukuLapakContent() {
     return (
         <div className="p-4 sm:p-8 min-h-screen text-slate-900 pb-20 w-full overflow-hidden flex flex-col relative bg-slate-50">
             {/* OVERLAY WAJIB LANDSCAPE UNTUK MOBILE */}
-            {isProjectOpen && (
+            {isProjectOpen && !abaikanRotasi && (
                 <div className="fixed inset-0 z-[100] bg-slate-900 text-white flex-col items-center justify-center p-8 text-center hidden portrait:flex md:hidden">
                     <div className="text-6xl mb-6 animate-pulse rotate-90">📱</div>
                     <h3 className="text-2xl font-black mb-2">Putar HP Kamu Cuy!</h3>
-                    <p className="text-slate-400 font-medium">Biar tabel Excel-nya kelihatan jelas dan gak sempit, putar HP kamu ke posisi <b>Landscape</b> (mendatar).</p>
+                    <p className="text-slate-400 font-medium mb-8">Biar tabel Excel-nya kelihatan jelas dan gak sempit, putar HP kamu ke posisi <b>Landscape</b> (mendatar).</p>
+                    <div className="flex flex-col gap-3 w-full max-w-[250px]">
+                        <button onClick={handleForceLandscape} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-all active:scale-95">
+                            Paksa Landscape 🔄
+                        </button>
+                        <button onClick={() => setAbaikanRotasi(true)} className="bg-transparent text-slate-400 hover:text-white text-sm font-bold py-3 transition-colors">
+                            Biarin Gini Aja (Sempit)
+                        </button>
+                    </div>
                 </div>
             )}
             <CustomModal {...modal} /> {/* ✅ RENDER MODAL UTAMA */}
