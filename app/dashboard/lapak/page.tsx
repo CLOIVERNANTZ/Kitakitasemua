@@ -488,50 +488,10 @@ function BukuLapakContent() {
                         </div>
                     </div>
 
-                    {/* TAMPILAN 1: MOBILE (Disembunyikan saat Export PDF) */}
-                    <div className="block md:hidden space-y-4 mb-6" data-html2canvas-ignore>
-                        {activeRows.length === 0 ? (<div className="text-center py-12 bg-white rounded-2xl border text-slate-400 italic text-sm">Pilih minimal 1 orang.</div>) : (
-                            <>
-                                {activeRows.map((row) => {
-                                    const sisa = getSisaKeseluruhan(row);
-                                    return (
-                                        <div key={row.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-                                            <div className="flex justify-between items-center border-b pb-3"><h4 className="font-bold text-slate-800 text-lg">{row.nama} {row.id === bendaharaId && '👑'}</h4><div className={`font-black text-xl ${sisa < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{sisa < 0 ? '' : '+'}{Math.round(sisa).toLocaleString('id-ID')}</div></div>
-                                            <div className="grid grid-cols-2 gap-3 text-sm">
-                                                <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Deposit</label><ExcelCell
-                                                    disabled={statusSesi === 'Closed'}
-                                                    value={row.pemasukan}
-                                                    rawValue={row.raw_pemasukan}
-                                                    onUpdate={(v: number, r: string) => updateSel(row.id, v, r)}
-                                                    className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded font-medium text-emerald-800"
-                                                /></div>
-                                                <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Nalangin</label><button onClick={() => setModalNalangin({ isOpen: true, rowId: row.id })} className="w-full text-left px-2 py-2 bg-blue-50 border rounded-lg text-blue-800 font-semibold">{getSumNalangin(row.nalangin_details) === 0 ? '+ Input Detail' : `Rp ${getSumNalangin(row.nalangin_details).toLocaleString('id-ID')}`}</button></div>
-                                            </div>
-                                            {kolomBiaya.length > 0 && (
-                                                <div className="pt-3 mt-1 border-t border-dashed">
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Pengeluaran Individu</label>
-                                                    <div className="space-y-2">
-                                                        {kolomBiaya.map(col => (
-                                                            <div key={col} className="flex justify-between items-center gap-2"><span className="text-sm font-medium text-slate-600 truncate w-1/2">{col}</span><ExcelCell
-                                                                disabled={statusSesi === 'Closed'}
-                                                                value={row.pengeluaran[col]}
-                                                                rawValue={row.raw_pengeluaran?.[col]}
-                                                                onUpdate={(v: number, r: string) => updatePengeluaran(row.id, col, v, r)}
-                                                                className="w-full text-right bg-transparent outline-none px-2 py-1.5 rounded text-slate-700"
-                                                            /></div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </>
-                        )}
-                    </div>
 
-                    {/* TAMPILAN 2: DESKTOP (TABEL YANG DI EXPORT) */}
-                    <div className="hidden md:block bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto flex-1 relative mb-6">
+
+                    {/* TAMPILAN TABEL EXCEL UTAMA */}
+                    <div className="block bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto flex-1 relative mb-6">
                         <table className="w-full text-sm text-right whitespace-nowrap min-w-max border-collapse">
                             <thead className="bg-slate-800 text-white">
                                 <tr>
