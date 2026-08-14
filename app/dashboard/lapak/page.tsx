@@ -375,6 +375,14 @@ function BukuLapakContent() {
 
     return (
         <div className="p-4 sm:p-8 min-h-screen text-slate-900 pb-20 w-full overflow-hidden flex flex-col relative bg-slate-50">
+            {/* OVERLAY WAJIB LANDSCAPE UNTUK MOBILE */}
+            {isProjectOpen && (
+                <div className="fixed inset-0 z-[100] bg-slate-900 text-white flex-col items-center justify-center p-8 text-center hidden portrait:flex md:hidden">
+                    <div className="text-6xl mb-6 animate-pulse rotate-90">📱</div>
+                    <h3 className="text-2xl font-black mb-2">Putar HP Kamu Cuy!</h3>
+                    <p className="text-slate-400 font-medium">Biar tabel Excel-nya kelihatan jelas dan gak sempit, putar HP kamu ke posisi <b>Landscape</b> (mendatar).</p>
+                </div>
+            )}
             <CustomModal {...modal} /> {/* ✅ RENDER MODAL UTAMA */}
 
             {/* MODAL NALANGIN */}
